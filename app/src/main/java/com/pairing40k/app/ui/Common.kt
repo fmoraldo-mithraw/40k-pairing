@@ -95,7 +95,7 @@ fun OptionRow(
         Text(pct(probability), color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.width(52.dp).padding(start = 8.dp))
         if (expected != null) Text(fmt1(expected), color = Bone, fontSize = 13.sp, modifier = Modifier.width(44.dp))
-        if (floor != null) Text(fmt1(floor), color = Muted, fontSize = 13.sp, modifier = Modifier.width(44.dp))
+        if (floor != null) Text(fmt1(floor), color = Muted, fontSize = 13.sp, modifier = Modifier.width(56.dp))
     }
 }
 
@@ -105,6 +105,6 @@ fun OptionHeader(expectedLabel: String = "Espér.", floorLabel: String? = "Planc
         Text("", Modifier.weight(1f))
         Text("Proba", color = Muted, fontSize = 11.sp, modifier = Modifier.width(52.dp).padding(start = 8.dp))
         Text(expectedLabel, color = Muted, fontSize = 11.sp, modifier = Modifier.width(44.dp))
-        if (floorLabel != null) Text(floorLabel, color = Muted, fontSize = 11.sp, modifier = Modifier.width(44.dp))
+        if (floorLabel != null) Text(floorLabel, color = Muted, fontSize = 11.sp, maxLines = 1, softWrap = false, modifier = Modifier.width(56.dp))
     }
 }
