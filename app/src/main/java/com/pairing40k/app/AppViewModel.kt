@@ -2,6 +2,7 @@ package com.pairing40k.app
 
 import android.app.Application
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pairing40k.app.data.AppData
@@ -9,6 +10,8 @@ import com.pairing40k.app.data.HistoryEntry
 import com.pairing40k.app.data.MatrixImport
 import com.pairing40k.app.data.Matchup
 import com.pairing40k.app.data.PlayedGame
+import com.pairing40k.app.data.Settings
+import com.pairing40k.app.data.WorkbookImport
 import com.pairing40k.app.data.Player
 import com.pairing40k.app.data.Store
 import com.pairing40k.app.data.Xlsx
@@ -40,13 +43,18 @@ class Analysis(
     val probabilities: Array<DoubleArray>
 )
 
-/** Import en attente de confirmation (aperçu, choix de l'échelle). */
-class PendingImport(
+/**
+ * Compte rendu du dernier import : les matrices sont déjà créées ; l'écran
+ * permet d'ajuster le début de matrice ou l'échelle puis de ré-appliquer.
+ */
+class ImportReport(
     val source: String,
-    val rows: List<List<String>>,
-    val result: MatrixImport.Result?,
-    val error: String?,
-    val scale: MatrixImport.Scale
+    val sheets: List<WorkbookImport.Sheet>,
+    val results: List<WorkbookImport.SheetResult>,
+    val scale: MatrixImport.Scale,
+    val created: Int,
+    val updated: Int,
+    val error: String? = null
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -64,8 +72,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val pairing: StateFlow<List<PairingState>> = _pairing.asStateFlow()
     private var pairingFor: String = _data.value.active.id
 
-    private val _pendingImport = MutableStateFlow<PendingImport?>(null)
-    val pendingImport: StateFlow<PendingImport?> = _pendingImport.asStateFlow()
+    private val _importReport = MutableStateFlow<ImportReport?>(null)
+    val importReport: StateFlow<ImportReport?> = _importReport.asStateFlow()
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -111,7 +119,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun newMatchup() = update { d ->
         val cur = d.active
-        val m = Matchup.blank(cur.size, cur.ourTeam, cur.ourPlayers)
+        val m = Matchup.blank(cur.size, d.settings.defaultTeam, cur.ourPlayers)
         d.copy(matchups = d.matchups + m, activeId = m.id)
     }
 
@@ -121,7 +129,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteActive() = update { d ->
-        val rest = d.matchups.filter { it.id != d.active.id }.ifEmpty { listOf(Matchup.blank(8)) }
+        val rest = d.matchups.filter { it.id != d.active.id }.ifEmpty { listOf(Matchup.blank(8, d.settings.defaultTeam)) }
         d.copy(matchups = rest, activeId = rest.last().id)
     }
 
@@ -191,39 +199,72 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ------------------------------------------------------------- import
 
+    /** Classeur Excel (tous les onglets) ou CSV : crée / met à jour les matrices. */
     fun importBytes(source: String, bytes: ByteArray) {
-        try {
-            val rows = if (Xlsx.isXlsx(bytes)) {
-                Xlsx.read(ByteArrayInputStream(bytes)).sheet(0)
+        val sheets = try {
+            if (Xlsx.isXlsx(bytes)) {
+                val book = Xlsx.read(ByteArrayInputStream(bytes))
+                book.sheetNames.mapIndexed { i, name -> WorkbookImport.Sheet(name, book.sheet(i)) }
             } else {
-                MatrixImport.parseCsv(String(bytes, Charsets.UTF_8))
+                listOf(WorkbookImport.Sheet(null, MatrixImport.parseCsv(String(bytes, Charsets.UTF_8))))
             }
-            preview(source, rows, MatrixImport.Scale.AUTO)
         } catch (e: Exception) {
-            _pendingImport.value = PendingImport(source, emptyList(), null, e.message ?: e.toString(), MatrixImport.Scale.AUTO)
+            _importReport.value = ImportReport(source, emptyList(), emptyList(), MatrixImport.Scale.AUTO, 0, 0, e.message ?: e.toString())
+            return
         }
+        applyImport(source, sheets, MatrixImport.Scale.AUTO)
     }
+
+    /** (Ré)applique l'import avec les réglages courants de début de matrice. */
+    fun applyImport(source: String, sheets: List<WorkbookImport.Sheet>, scale: MatrixImport.Scale) {
+        val d = _data.value
+        val fallback = source.substringBeforeLast('.').ifBlank { "Adversaire" }
+        val results = WorkbookImport.analyze(sheets, d.settings, scale, d.active.maxScore, fallback)
+        val merge = WorkbookImport.merge(d, results)
+        if (merge.created + merge.updated > 0) update { merge.data }
+        _importReport.value = ImportReport(
+            source, sheets, results, scale, merge.created, merge.updated,
+            if (results.none { it.ok }) "Aucune matrice reconnue" else null
+        )
+    }
+
+    fun reapplyImport(scale: MatrixImport.Scale) {
+        val r = _importReport.value ?: return
+        applyImport(r.source, r.sheets, scale)
+    }
+
+    fun closeImport() { _importReport.value = null }
 
     fun importUri(uri: Uri) {
         viewModelScope.launch {
-            val bytes = withContext(Dispatchers.IO) {
-                runCatching { getApplication<Application>().contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
+            val resolver = getApplication<Application>().contentResolver
+            val (name, bytes) = withContext(Dispatchers.IO) {
+                val n = runCatching {
+                    resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                        if (c.moveToFirst()) c.getString(0) else null
+                    }
+                }.getOrNull()
+                n to runCatching { resolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
             }
-            if (bytes == null) toast("Impossible de lire le fichier") else importBytes(uri.lastPathSegment ?: "Fichier", bytes)
+            if (bytes == null) toast("Impossible de lire le fichier") else importBytes(name ?: uri.lastPathSegment ?: "Fichier", bytes)
         }
     }
 
     fun importText(source: String, text: String) = importBytes(source, text.toByteArray())
 
+    /**
+     * Lien Google Sheets : on télécharge le classeur en .xlsx pour avoir tous
+     * les onglets avec leurs noms. Autre lien : contenu brut (CSV ou xlsx).
+     */
     fun importUrl(url: String) {
-        val csvUrl = MatrixImport.googleSheetsCsvUrl(url) ?: url.trim()
+        val target = MatrixImport.googleSheetsXlsxUrl(url) ?: url.trim()
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val c = URL(csvUrl).openConnection() as HttpURLConnection
+                    val c = URL(target).openConnection() as HttpURLConnection
                     c.instanceFollowRedirects = true
                     c.connectTimeout = 15_000
-                    c.readTimeout = 15_000
+                    c.readTimeout = 30_000
                     val code = c.responseCode
                     if (code != 200) error("HTTP $code — le fichier est-il partagé « tous les utilisateurs disposant du lien » ?")
                     val type = c.contentType.orEmpty()
@@ -234,43 +275,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
             result.fold(
                 onSuccess = { importBytes("Google Sheets", it) },
-                onFailure = { _pendingImport.value = PendingImport("Google Sheets", emptyList(), null, it.message ?: it.toString(), MatrixImport.Scale.AUTO) }
+                onFailure = {
+                    _importReport.value = ImportReport("Google Sheets", emptyList(), emptyList(), MatrixImport.Scale.AUTO, 0, 0, it.message ?: it.toString())
+                }
             )
         }
     }
 
-    fun preview(source: String, rows: List<List<String>>, scale: MatrixImport.Scale) {
-        val m = _data.value.active
-        _pendingImport.value = try {
-            PendingImport(source, rows, MatrixImport.parseTable(rows, m.maxScore, scale), null, scale)
-        } catch (e: MatrixImport.ImportException) {
-            PendingImport(source, rows, null, e.message, scale)
-        }
-    }
+    // ----------------------------------------------------------- réglages
 
-    fun cancelImport() { _pendingImport.value = null }
+    fun updateSettings(f: (Settings) -> Settings) = update { it.copy(settings = f(it.settings)) }
 
-    /** [asNew] : crée une nouvelle confrontation au lieu d'écraser l'active. */
-    fun confirmImport(asNew: Boolean) {
-        val r = _pendingImport.value?.result ?: return
-        _pendingImport.value = null
-        val n = r.size
-        val fit = if (n in setOf(4, 6, 8)) n else listOf(8, 6, 4).first { it <= n }
-        fun <T> cut(l: List<T>) = l.take(fit)
-        val apply = { m: Matchup ->
-            m.copy(
-                ourPlayers = cut(r.ourPlayers),
-                theirPlayers = cut(r.theirPlayers),
-                scores = cut(r.scores).map { cut(it) }
-            )
-        }
-        if (asNew) {
-            update { d ->
-                val m = apply(Matchup.blank(fit, d.active.ourTeam))
-                d.copy(matchups = d.matchups + m, activeId = m.id)
-            }
-        } else updateMatchup(apply)
-        toast("Matrice ${fit}×$fit importée")
+    /** Donne le nom par défaut à notre équipe dans toutes les matrices. */
+    fun applyDefaultTeamEverywhere() = update { d ->
+        d.copy(matchups = d.matchups.map { it.copy(ourTeam = d.settings.defaultTeam) })
     }
 
     // ---------------------------------------------------- sauvegarde JSON

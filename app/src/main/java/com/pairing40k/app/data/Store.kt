@@ -15,6 +15,12 @@ object Store {
         put("activeId", data.activeId ?: JSONObject.NULL)
         put("matchups", JSONArray(data.matchups.map(::matchupJson)))
         put("history", JSONArray(data.history.map(::historyJson)))
+        put("settings", JSONObject().apply {
+            put("defaultTeam", data.settings.defaultTeam)
+            put("autoStart", data.settings.autoStart)
+            put("startRow", data.settings.startRow)
+            put("startCol", data.settings.startCol)
+        })
     }.toString()
 
     fun fromJson(text: String): AppData {
@@ -25,7 +31,15 @@ object Store {
         return AppData(
             matchups = matchups.ifEmpty { listOf(Matchup.blank(8)) },
             activeId = if (o.isNull("activeId")) null else o.optString("activeId"),
-            history = history
+            history = history,
+            settings = o.optJSONObject("settings")?.let { st ->
+                Settings(
+                    defaultTeam = st.optString("defaultTeam", "Nous"),
+                    autoStart = st.optBoolean("autoStart", true),
+                    startRow = st.optInt("startRow", 1).coerceAtLeast(1),
+                    startCol = st.optInt("startCol", 1).coerceAtLeast(1)
+                )
+            } ?: Settings()
         )
     }
 

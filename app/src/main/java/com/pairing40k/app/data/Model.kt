@@ -68,10 +68,23 @@ data class HistoryEntry(
     val actualTotal: Double? get() = if (games.all { it.actual != null }) games.sumOf { it.actual!! } else null
 }
 
+/**
+ * Réglages persistés : nom de notre équipe pour les nouvelles matrices, et
+ * position par défaut de la matrice dans les fichiers importés (1 = A / 1re ligne).
+ */
+data class Settings(
+    val defaultTeam: String = "Nous",
+    /** Début de matrice détecté automatiquement ; sinon [startRow] / [startCol]. */
+    val autoStart: Boolean = true,
+    val startRow: Int = 1,
+    val startCol: Int = 1
+)
+
 data class AppData(
     val matchups: List<Matchup> = listOf(Matchup.blank(8)),
     val activeId: String? = null,
-    val history: List<HistoryEntry> = emptyList()
+    val history: List<HistoryEntry> = emptyList(),
+    val settings: Settings = Settings()
 ) {
     val active: Matchup get() = matchups.firstOrNull { it.id == activeId } ?: matchups.first()
 }

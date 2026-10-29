@@ -42,14 +42,21 @@ d'une seconde. Deux lectures sont données à chaque fois :
 ## Fonctionnalités
 
 **Matrice**
-- Import **CSV / TSV** (séparateur `;` d'Excel FR, `,`, tabulation), **Excel .xlsx**,
-  **lien Google Sheets** (partagé « tous les utilisateurs disposant du lien », l'onglet
-  du lien est importé), **copier-coller** d'une plage Sheets/Excel, ou fichier
-  partagé/ouvert depuis Drive, mail…
-- Deux dispositions : **grille** (adversaires en 1re ligne, nos joueurs en 1re colonne,
-  lignes/colonnes de factions facultatives) ou **liste** `joueur ; adversaire ; score`.
-- Échelles reconnues automatiquement (modifiable à l'aperçu) : points 0-20, notes 1-5,
-  relatif −2…+2, symboles `-- - = + ++`, pourcentages, scores `13-7`.
+- **Un classeur = toutes les matrices** : charger un Excel (.xlsx) ou un lien Google Sheets
+  crée une matrice par onglet, nommée d'après l'onglet (l'équipe adverse). Les onglets qui
+  ne sont pas des matrices (tableau de bord…) sont ignorés ; ré-importer le même fichier
+  **met à jour** les matrices du même nom (notes conservées) au lieu de les dupliquer.
+- **Début de matrice détecté automatiquement** (titres, lignes de mission, colonne vide à
+  gauche, ligne / colonne de totaux et notes de pairing sous la matrice sont ignorés), ou
+  forcé à la main (colonne + ligne de la case du coin) dans les réglages.
+- **Nom de notre équipe par défaut** (réglages), appliqué aux nouvelles matrices.
+- Lien Google Sheets : le fichier doit être partagé « tous les utilisateurs disposant du lien ».
+- Aussi : **CSV / TSV** (séparateur `;` d'Excel FR, `,`, tabulation), **copier-coller** d'une
+  plage, fichier partagé / ouvert depuis Drive, mail… (nom d'équipe = case du coin, sinon nom du fichier).
+- Dispositions : **grille** (adversaires en ligne d'en-tête, nos joueurs en colonne, factions
+  facultatives) ou **liste** `joueur ; adversaire ; score`.
+- Échelles reconnues automatiquement (modifiable après import) : points 0-20, notes 1-5,
+  relatif −2…+2, symboles `-- - = + ++`, pourcentages, scores `13-7`. Case vide = égalité.
 - Noms au format `Jean (Orks)` → nom + faction.
 - Édition directe, carte de chaleur, plusieurs confrontations (préparer tout le tournoi),
   dupliquer, **inverser** le point de vue, notes, export CSV / partage.

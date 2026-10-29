@@ -29,7 +29,9 @@ object MatrixImport {
         val scores: List<List<Double>>,
         val scale: Scale,
         val layout: String,
-        val warnings: List<String>
+        val warnings: List<String>,
+        /** Texte de la case du coin (souvent le nom de l'équipe adverse). */
+        val cornerName: String? = null
     ) {
         val size: Int get() = ourPlayers.size
     }
@@ -155,7 +157,13 @@ object MatrixImport {
                 body = body.drop(1)
             }
         }
-        val rows = body.filter { r -> r.getOrElse(0) { "" }.isNotEmpty() && cols.any { isValue(r.getOrElse(it) { "" }) } }
+        // Bloc contigu de joueurs : s'arrête à la ligne de totaux (sans nom) ou
+        // aux notes sous la matrice, qui ne sont pas des affiches
+        val isPlayerRow = { r: List<String> ->
+            r.getOrElse(0) { "" }.let { it.isNotEmpty() && !isValue(it) } && cols.any { isValue(r.getOrElse(it) { "" }) }
+        }
+        val first = body.indexOfFirst(isPlayerRow)
+        val rows = if (first < 0) emptyList() else body.drop(first).takeWhile(isPlayerRow)
         if (rows.isEmpty()) throw ImportException("Aucune ligne de scores trouvée sous l'en-tête")
         // Une colonne d'en-tête sans aucune valeur (ex. « Faction ») n'est pas un adversaire
         val textCols = cols.filter { c -> rows.none { isValue(it.getOrElse(c) { "" }) } }
@@ -185,7 +193,8 @@ object MatrixImport {
             val f = theirFactions?.getOrNull(k).orEmpty()
             if (f.isNotEmpty() && p.faction.isEmpty()) p.copy(faction = f) else p
         }
-        return finish(ours, theirs, scores, scale, "grille", warnings)
+        val corner = header[0].takeIf { it.isNotEmpty() && !isValue(it) }
+        return finish(ours, theirs, scores, scale, "grille", warnings, corner)
     }
 
     private fun parseLong(table: List<List<String>>, maxScore: Double, forced: Scale): Result {
@@ -218,12 +227,12 @@ object MatrixImport {
 
     private fun finish(
         ours: List<Player>, theirs: List<Player>, scores: List<List<Double>>, scale: Scale,
-        layout: String, warnings: MutableList<String>
+        layout: String, warnings: MutableList<String>, corner: String? = null
     ): Result {
         val n = ours.size
         if (n < 4) throw ImportException("Seulement $n joueur(s) trouvé(s)")
         if (n !in setOf(4, 6, 8)) warnings += "$n joueurs : l'app gère 4, 6 ou 8 — ajuste la taille avant d'analyser"
-        return Result(ours, theirs, scores, scale, layout, warnings)
+        return Result(ours, theirs, scores, scale, layout, warnings, corner)
     }
 
     private fun symbolRange(values: List<String>): Int {
@@ -234,6 +243,73 @@ object MatrixImport {
             else parseNumber(t)?.let { if (it < 0 || it in 2.5..3.0) r = max(r, abs(it).toInt()) }
         }
         return minOf(r, 3)
+    }
+
+    // ------------------------------------------------------ position
+
+    /** Ne garde que le tableau à partir de la ligne / colonne de début (1 = première). */
+    fun crop(rows: List<List<String>>, startRow: Int, startCol: Int): List<List<String>> =
+        rows.drop((startRow - 1).coerceAtLeast(0)).map { it.drop((startCol - 1).coerceAtLeast(0)) }
+
+    /**
+     * Trouve le coin haut-gauche du tableau (ligne d'en-tête, colonne des noms),
+     * 1 = première ligne / colonne A. Gère titres, lignes vides et colonnes
+     * décalées au-dessus / à gauche de la matrice.
+     */
+    fun detectStart(rows: List<List<String>>): Pair<Int, Int> {
+        fun cell(r: Int, c: Int) = rows.getOrNull(r)?.getOrNull(c)?.trim().orEmpty()
+        fun text(r: Int, c: Int) = cell(r, c).let { it.isNotEmpty() && !isValue(it) }
+        val valueCols = rows.map { r -> r.indices.filter { isValue(r[it]) } }
+
+        // Grille : lignes portant au moins 4 valeurs
+        val gridRows = rows.indices.filter { valueCols[it].size >= 4 }
+        if (gridRows.size >= 4) {
+            val first = gridRows.first()
+            // Colonnes de scores : celles remplies sur la majorité des lignes de la grille
+            val counts = HashMap<Int, Int>()
+            for (r in gridRows) for (c in valueCols[r]) counts[c] = (counts[c] ?: 0) + 1
+            val cols = counts.filter { it.value * 2 >= gridRows.size }.keys.sorted()
+            if (cols.size >= 4) {
+                val firstCol = cols.first()
+                // En-tête : bloc de lignes de texte juste au-dessus (en-tête + factions éventuelles)
+                var header = first
+                while (header - 1 >= 0 && cols.count { text(header - 1, it) } * 2 >= cols.size && first - header < 2) header--
+                // Noms : bloc de colonnes de texte juste à gauche (noms + factions éventuelles)
+                var nameCol = firstCol
+                while (nameCol - 1 >= 0 && gridRows.count { text(it, nameCol - 1) } * 2 >= gridRows.size && firstCol - nameCol < 2) nameCol--
+                if (header == first) header = (first - 1).coerceAtLeast(0)
+                if (nameCol == firstCol) nameCol = (firstCol - 1).coerceAtLeast(0)
+                return (header + 1) to (nameCol + 1)
+            }
+        }
+
+        // Liste : « nom ; nom ; valeur » — première colonne où ce motif domine
+        val width = rows.maxOfOrNull { it.size } ?: 0
+        for (c in 0 until width - 2) {
+            val hits = rows.indices.filter { text(it, c) && text(it, c + 1) && isValue(cell(it, c + 2)) }
+            if (hits.size >= 4) {
+                val first = hits.first()
+                val start = if (first > 0 && text(first - 1, c) && text(first - 1, c + 1) && !isValue(cell(first - 1, c + 2))) first - 1 else first
+                return (start + 1) to (c + 1)
+            }
+        }
+        return 1 to 1
+    }
+
+    /** « B », « b », « 2 » → 2 ; « AA » → 27 ; null si illisible. */
+    fun parseColumn(raw: String): Int? {
+        val t = raw.trim().uppercase()
+        if (t.isEmpty()) return null
+        t.toIntOrNull()?.let { return it.takeIf { n -> n >= 1 } }
+        if (!t.all { it in 'A'..'Z' }) return null
+        return t.fold(0) { n, c -> n * 26 + (c - 'A' + 1) }
+    }
+
+    fun columnLabel(n: Int): String {
+        var k = n
+        val sb = StringBuilder()
+        while (k > 0) { val r = (k - 1) % 26; sb.insert(0, 'A' + r); k = (k - 1) / 26 }
+        return sb.toString()
     }
 
     // ------------------------------------------------------ Google Sheets
@@ -251,6 +327,16 @@ object MatrixImport {
         }
         val gid = Regex("[#&?]gid=(\\d+)").find(url)?.groupValues?.get(1)
         return "https://docs.google.com/spreadsheets/d/$id/export?format=csv" + (gid?.let { "&gid=$it" } ?: "")
+    }
+
+    /**
+     * Export .xlsx du classeur entier : contrairement au CSV (un seul onglet),
+     * il garde toutes les feuilles avec leur nom, pour choisir l'équipe.
+     */
+    fun googleSheetsXlsxUrl(url: String): String? {
+        val id = Regex("/spreadsheets/d/(e/)?([a-zA-Z0-9_-]+)").find(url) ?: return null
+        return if (id.groupValues[1].isNotEmpty()) "https://docs.google.com/spreadsheets/d/e/${id.groupValues[2]}/pub?output=xlsx"
+        else "https://docs.google.com/spreadsheets/d/${id.groupValues[2]}/export?format=xlsx"
     }
 
     // ------------------------------------------------------------- export

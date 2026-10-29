@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -71,6 +72,7 @@ import com.pairing40k.app.AppViewModel
 import com.pairing40k.app.data.MatrixImport
 import com.pairing40k.app.data.Matchup
 import com.pairing40k.app.data.Player
+import com.pairing40k.app.data.Settings
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -132,7 +134,7 @@ fun MatrixScreen(vm: AppViewModel) {
             }
         }
 
-        Section("Importer / exporter", subtitle = "CSV, Excel (.xlsx) ou lien Google Sheets. Grille (adversaires en 1re ligne, nos joueurs en 1re colonne) ou liste « joueur ; adversaire ; score ».") {
+        Section("Importer / exporter", subtitle = "Excel (.xlsx) ou lien Google Sheets : une matrice par onglet, au nom de l'onglet (l'équipe adverse). Aussi CSV ou copier-coller.") {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ActionChip("Fichier", Icons.Rounded.FolderOpen) { openFile.launch(arrayOf("*/*")) }
                 ActionChip("Google Sheets", Icons.Rounded.Link) { askUrl = true }
@@ -168,6 +170,17 @@ fun MatrixScreen(vm: AppViewModel) {
             }
         }
 
+        Section("Réglages") {
+            var team by remember(data.settings.defaultTeam) { mutableStateOf(data.settings.defaultTeam) }
+            OutlinedTextField(team, { t ->
+                team = t
+                if (t.isNotBlank()) vm.updateSettings { it.copy(defaultTeam = t.trim()) }
+            }, label = { Text("Nom de notre équipe (par défaut)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            TextButton({ vm.applyDefaultTeamEverywhere() }) { Text("Appliquer à toutes les matrices") }
+            Text("Début de la matrice dans les fichiers importés", color = Muted, fontSize = 12.sp)
+            StartPositionControls(data.settings) { st -> vm.updateSettings { st } }
+        }
+
         Section("Notes") {
             OutlinedTextField(m.notes, { v -> vm.updateMatchup { it.copy(notes = v) } },
                 placeholder = { Text("Listes, missions, consignes…") }, modifier = Modifier.fillMaxWidth().height(110.dp))
@@ -192,7 +205,7 @@ fun MatrixScreen(vm: AppViewModel) {
             dismissButton = { TextButton({ confirmDelete = false }) { Text("Annuler") } }
         )
     }
-    ImportPreviewDialog(vm)
+    ImportReportDialog(vm)
 }
 
 @Composable
@@ -315,53 +328,102 @@ private fun UrlDialog(onDismiss: () -> Unit, onOk: (String) -> Unit) {
     )
 }
 
+/** Début de matrice : détection automatique ou ligne / colonne forcées. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ImportPreviewDialog(vm: AppViewModel) {
-    val pending by vm.pendingImport.collectAsState()
-    val p = pending ?: return
+fun StartPositionControls(settings: Settings, onChange: (Settings) -> Unit) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
+        FilterChip(selected = settings.autoStart, onClick = { onChange(settings.copy(autoStart = true)) }, label = { Text("Début auto") })
+        FilterChip(selected = !settings.autoStart, onClick = { onChange(settings.copy(autoStart = false)) }, label = { Text("Manuel") })
+    }
+    if (!settings.autoStart) {
+        var col by remember(settings.startCol) { mutableStateOf(MatrixImport.columnLabel(settings.startCol)) }
+        var row by remember(settings.startRow) { mutableStateOf(settings.startRow.toString()) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(col, { t ->
+                col = t
+                MatrixImport.parseColumn(t)?.let { onChange(settings.copy(startCol = it)) }
+            }, label = { Text("Colonne (A, B…)") }, singleLine = true, modifier = Modifier.weight(1f))
+            OutlinedTextField(row, { t ->
+                row = t
+                t.toIntOrNull()?.takeIf { it >= 1 }?.let { onChange(settings.copy(startRow = it)) }
+            }, label = { Text("Ligne") }, singleLine = true, modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+        }
+        Text("Case du coin : celle au-dessus des noms de nos joueurs et à gauche des adversaires.", color = Muted, fontSize = 11.sp)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ImportReportDialog(vm: AppViewModel) {
+    val report by vm.importReport.collectAsState()
+    val data by vm.data.collectAsState()
+    val r = report ?: return
+    var adjust by remember(r.source) { mutableStateOf(false) }
+    var open by remember(r.source) { mutableStateOf<String?>(null) }
     AlertDialog(
-        onDismissRequest = { vm.cancelImport() },
-        title = { Text("Import : ${p.source}") },
+        onDismissRequest = { vm.closeImport() },
+        title = { Text("Import : ${r.source}") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (p.error != null) Text(p.error, color = MaterialTheme.colorScheme.error)
-                val r = p.result
-                if (r != null) {
-                    Text("${r.size}×${r.size} · disposition ${r.layout} · échelle « ${r.scale.label} »", color = Bone)
-                    r.warnings.forEach { Text("⚠ $it", color = Gold, fontSize = 13.sp) }
-                    Text("Nous : " + r.ourPlayers.joinToString { it.label }, fontSize = 12.sp, color = OurRed)
-                    Text("Eux : " + r.theirPlayers.joinToString { it.label }, fontSize = 12.sp, color = TheirBlue)
-                    // Mini aperçu coloré
-                    Column {
-                        r.scores.forEach { row ->
-                            Row {
-                                row.forEach { v ->
-                                    Box(Modifier.size(26.dp).padding(1.dp).background(scoreColor(v, 20.0)), contentAlignment = Alignment.Center) {
-                                        Text(fmt1(v), fontSize = 9.sp, color = Color.White)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (r.created + r.updated > 0) {
+                    Text(
+                        listOfNotNull(
+                            r.created.takeIf { it > 0 }?.let { "$it matrice(s) créée(s)" },
+                            r.updated.takeIf { it > 0 }?.let { "$it mise(s) à jour" }
+                        ).joinToString(", "),
+                        color = Gold, fontWeight = FontWeight.Bold
+                    )
+                }
+                r.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                r.results.forEach { s ->
+                    val res = s.result
+                    Column(Modifier.fillMaxWidth().clickable { open = if (open == s.team) null else s.team }) {
+                        Text(
+                            (if (res != null) "✓ " else "✗ ") + s.team,
+                            color = if (res != null) Bone else Muted, fontWeight = FontWeight.Bold, fontSize = 14.sp
+                        )
+                        Text(
+                            if (res != null) "${res.size}×${res.size} · début ${s.startLabel} · ${res.scale.label}" +
+                                (if (res.warnings.isNotEmpty()) " · ⚠ ${res.warnings.joinToString()}" else "")
+                            else "ignoré : ${s.error}",
+                            color = Muted, fontSize = 12.sp
+                        )
+                        if (res != null && open == s.team) {
+                            Text("Nous : " + res.ourPlayers.joinToString { it.label }, fontSize = 12.sp, color = OurRed)
+                            Text("Eux : " + res.theirPlayers.joinToString { it.label }, fontSize = 12.sp, color = TheirBlue)
+                            Column(Modifier.padding(top = 4.dp)) {
+                                res.scores.forEach { row ->
+                                    Row {
+                                        row.forEach { v ->
+                                            Box(Modifier.size(26.dp).padding(1.dp).background(scoreColor(v, 20.0)), contentAlignment = Alignment.Center) {
+                                                Text(fmt1(v), fontSize = 9.sp, color = Color.White)
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
-                if (p.rows.isNotEmpty()) {
+                if (r.sheets.isNotEmpty()) {
+                    TextButton({ adjust = !adjust }) { Text(if (adjust) "Masquer les réglages" else "Ajuster (début de matrice, échelle)…") }
+                }
+                if (adjust) {
+                    StartPositionControls(data.settings) { vm.updateSettings { _ -> it } }
                     Text("Échelle des valeurs", color = Muted, fontSize = 12.sp)
+                    var scale by remember(r) { mutableStateOf(r.scale) }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MatrixImport.Scale.entries.forEach { s ->
-                            FilterChip(selected = p.scale == s, onClick = { vm.preview(p.source, p.rows, s) }, label = { Text(s.label, fontSize = 11.sp) })
+                        MatrixImport.Scale.entries.forEach { sc ->
+                            FilterChip(selected = scale == sc, onClick = { scale = sc }, label = { Text(sc.label, fontSize = 11.sp) })
                         }
                     }
+                    Button({ vm.reapplyImport(scale) }) { Text("Ré-appliquer") }
                 }
             }
         },
-        confirmButton = {
-            if (p.result != null) Row {
-                TextButton({ vm.confirmImport(asNew = true) }) { Text("Nouvelle matrice") }
-                TextButton({ vm.confirmImport(asNew = false) }) { Text("Remplacer") }
-            }
-        },
-        dismissButton = { TextButton({ vm.cancelImport() }) { Text("Annuler") } }
+        confirmButton = { TextButton({ vm.closeImport() }) { Text("OK") } }
     )
 }
 

@@ -242,6 +242,7 @@ private fun ChoicesStep(m: Matchup, a: Analysis, st: PairingState, training: Boo
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DoneStep(m: Matchup, a: Analysis, st: PairingState, onSave: () -> Unit, onNew: () -> Unit) {
     val context = LocalContext.current
@@ -252,10 +253,11 @@ private fun DoneStep(m: Matchup, a: Analysis, st: PairingState, onSave: () -> Un
             Stat("Écart / équilibre", (if (total >= a.value) "+" else "") + fmt1(total - a.value), sub = "vs ${fmt1(a.value)} attendu")
         }
         GamesList(m, st.games)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // FlowRow : sur un écran étroit, les boutons passent à la ligne au lieu d'être écrasés
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onSave, colors = ButtonDefaults.buttonColors(containerColor = Gold)) { Icon(Icons.Rounded.Save, null); Text(" Historique") }
             OutlinedButton({ shareText(context, m.title, summary(m, st.games)) }) { Icon(Icons.Rounded.Share, null); Text(" Partager") }
-            OutlinedButton(onNew) { Text("Nouveau") }
+            OutlinedButton(onNew) { Icon(Icons.Rounded.RestartAlt, null); Text(" Nouveau pairing") }
         }
     }
 }
