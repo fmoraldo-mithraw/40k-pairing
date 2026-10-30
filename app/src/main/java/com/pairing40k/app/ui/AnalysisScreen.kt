@@ -72,17 +72,17 @@ fun AnalysisScreen(vm: AppViewModel) {
         }
 
         Section(
-            "Premier défenseur", subtitle = "Stratégie optimale (mixte) : tire au sort selon les %, ne joue pas toujours le même. " +
-                "Espér. = points attendus ; plancher = pire cas si l'adversaire lit votre jeu."
+            "Premier défenseur", subtitle = "Espér. = points d'équipe attendus · Plancher = pire cas si l'adversaire devine ton choix."
         ) {
+            Advice("pose en premier défenseur", defenders.ours) { m.ourPlayers[it].name }
             OptionHeader()
             defenders.ours.sortedByDescending { it.probability * 1000 + it.expected }.forEach {
-                OptionRow(m.ourPlayers[it.option].label, it.probability, it.expected, it.floor, OurRed, highlight = it.probability > 0.01)
+                OptionRow(m.ourPlayers[it.option].label, it.probability, it.expected, it.floor, OurRed, dimmed = it.probability < 0.01)
             }
             Text("Défenseur adverse probable", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
-            OptionHeader(expectedLabel = "Nous", floorLabel = null)
+            OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
             defenders.theirs.sortedByDescending { it.probability }.forEach {
-                OptionRow(m.theirPlayers[it.option].label, it.probability, it.expected, null, TheirBlue, highlight = it.probability > 0.01)
+                OptionRow(m.theirPlayers[it.option].label, it.probability, it.expected, null, TheirBlue, dimmed = it.probability < 0.01)
             }
         }
 

@@ -144,18 +144,20 @@ private fun DefendersStep(m: Matchup, a: Analysis, st: PairingState, training: B
     var ours by remember(st) { mutableStateOf<Int?>(null) }
     var theirs by remember(st) { mutableStateOf<Int?>(null) }
 
-    Section("Notre défenseur", subtitle = "Tire au sort selon les % (bouton dé) : jouer toujours le « meilleur » se fait lire.") {
+    Section("Notre défenseur", subtitle = "Espér. = points d'équipe attendus · Plancher = pire cas si l'adversaire devine ton choix.") {
+        Advice("pose", an.ours) { m.ourPlayers[it].name }
         OptionHeader()
         an.ours.sortedByDescending { it.probability * 1000 + it.expected }.forEach {
             OptionRow(m.ourPlayers[it.option].label, it.probability, it.expected, it.floor, OurRed,
-                highlight = ours == it.option, onClick = { ours = it.option })
+                highlight = ours == it.option, dimmed = it.probability < 0.01, onClick = { ours = it.option })
         }
         Button({ ours = draw(an.ours) }, colors = ButtonDefaults.buttonColors(containerColor = OurRed)) {
             Icon(Icons.Rounded.Casino, null); Text(" Tirer notre défenseur")
         }
     }
-    Section("Leur défenseur", subtitle = if (training) "Choisi par l'adversaire virtuel à la validation." else "Saisis la carte révélée. % = ce qu'un adversaire optimal ferait ; « Nous » = nos points s'il le pose.") {
-        OptionHeader(expectedLabel = "Nous", floorLabel = null)
+    Section("Leur défenseur", subtitle = if (training) "Choisi par l'adversaire virtuel à la validation." else "« Nous » = nos points d'équipe attendus s'il le pose.") {
+        if (!training) Prediction("poseront", an.theirs) { m.theirPlayers[it].name }
+        OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
         an.theirs.sortedByDescending { it.probability }.forEach {
             OptionRow(m.theirPlayers[it.option].label, it.probability, it.expected, null, TheirBlue,
                 highlight = theirs == it.option, onClick = if (training) null else ({ theirs = it.option }))
@@ -182,10 +184,11 @@ private fun AttackersStep(m: Matchup, a: Analysis, st: PairingState, training: B
         }
     }
     Section("Nos 2 attaquants", subtitle = "Contre ${m.theirPlayers[st.theirDefender].name}. Touche une paire ou choisis les joueurs.") {
+        Advice("envoie", an.ours) { p -> p.joinToString(" + ") { m.ourPlayers[it].name } }
         OptionHeader()
         an.ours.sortedByDescending { it.probability * 1000 + it.expected }.take(8).forEach { o ->
             OptionRow(o.option.joinToString(" + ") { m.ourPlayers[it].name }, o.probability, o.expected, o.floor, OurRed,
-                highlight = ours.sorted() == o.option, onClick = { ours = o.option })
+                highlight = ours.sorted() == o.option, dimmed = o.probability < 0.01, onClick = { ours = o.option })
         }
         PlayerPicker(PairingSolver.bits(st.ourLeft).filter { it != st.ourDefender }, ours, { m.ourPlayers[it].name }, OurRed) { ours = it }
         Button({ ours = draw(an.ours) }, colors = ButtonDefaults.buttonColors(containerColor = OurRed)) {
@@ -193,7 +196,8 @@ private fun AttackersStep(m: Matchup, a: Analysis, st: PairingState, training: B
         }
     }
     Section("Leurs 2 attaquants", subtitle = if (training) "Choisis par l'adversaire virtuel à la validation." else "Contre ${m.ourPlayers[st.ourDefender].name}.") {
-        OptionHeader(expectedLabel = "Nous", floorLabel = null)
+        if (!training) Prediction("enverront", an.theirs) { p -> p.joinToString(" + ") { m.theirPlayers[it].name } }
+        OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
         an.theirs.sortedByDescending { it.probability }.take(6).forEach { o ->
             OptionRow(o.option.joinToString(" + ") { m.theirPlayers[it].name }, o.probability, o.expected, null, TheirBlue,
                 highlight = theirs.sorted() == o.option, onClick = if (training) null else ({ theirs = o.option }))
@@ -216,17 +220,19 @@ private fun ChoicesStep(m: Matchup, a: Analysis, st: PairingState, training: Boo
 
     Section("${m.ourPlayers[st.ourDefender].name} choisit son adversaire", subtitle = "Notre défenseur prend l'un de leurs deux attaquants ; l'autre retourne dans le pool" +
         if (st.isLastRound) " (et jouera contre notre attaquant refusé)." else ".") {
+        Advice("${m.ourPlayers[st.ourDefender].name} prend", an.ours) { m.theirPlayers[it].name }
         OptionHeader()
         an.ours.forEach {
             OptionRow(m.theirPlayers[it.option].label + "  (${fmt1(m.scores[st.ourDefender][it.option])})", it.probability, it.expected, it.floor, OurRed,
-                highlight = ours == it.option, onClick = { ours = it.option })
+                highlight = ours == it.option, dimmed = it.probability < 0.01, onClick = { ours = it.option })
         }
         Button({ ours = draw(an.ours) }, colors = ButtonDefaults.buttonColors(containerColor = OurRed)) {
             Icon(Icons.Rounded.Casino, null); Text(" Tirer")
         }
     }
     Section("${m.theirPlayers[st.theirDefender].name} choisit parmi nos attaquants", subtitle = if (training) "Choix de l'adversaire virtuel à la validation." else "Saisis son choix.") {
-        OptionHeader(expectedLabel = "Nous", floorLabel = null)
+        if (!training) Prediction("prendront", an.theirs) { m.ourPlayers[it].name }
+        OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
         an.theirs.forEach {
             OptionRow(m.ourPlayers[it.option].label + "  (${fmt1(m.scores[it.option][st.theirDefender])})", it.probability, it.expected, null, TheirBlue,
                 highlight = theirs == it.option, onClick = if (training) null else ({ theirs = it.option }))
