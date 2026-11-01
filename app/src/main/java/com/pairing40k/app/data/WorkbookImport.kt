@@ -36,6 +36,9 @@ object WorkbookImport {
                 // Ex. un tableau de bord « Estimé / Réel / Diff » répété : pas une matrice
                 r.theirPlayers.map { it.name.lowercase() }.distinct().size < r.size ||
                     r.ourPlayers.map { it.name.lowercase() }.distinct().size < r.size -> "noms de joueurs en double : pas une matrice"
+                r.allZero -> "que des 0 : pas une matrice d'estimations"
+                r.layout == "grille" && r.rowsFound != r.colsFound ->
+                    "${r.rowsFound} lignes pour ${r.colsFound} colonnes : pas une matrice carrée"
                 else -> null
             }
             SheetResult(sheet, team, row, col, if (error == null) r else null, error)

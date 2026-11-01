@@ -31,7 +31,12 @@ object MatrixImport {
         val layout: String,
         val warnings: List<String>,
         /** Texte de la case du coin (souvent le nom de l'équipe adverse). */
-        val cornerName: String? = null
+        val cornerName: String? = null,
+        /** Que des 0 saisis : un tableau de bord, pas des estimations. */
+        val allZero: Boolean = false,
+        /** Taille du tableau trouvé avant recadrage au carré (lignes × colonnes). */
+        val rowsFound: Int = 0,
+        val colsFound: Int = 0
     ) {
         val size: Int get() = ourPlayers.size
     }
@@ -159,14 +164,21 @@ object MatrixImport {
         }
         // Bloc contigu de joueurs : s'arrête à la ligne de totaux (sans nom) ou
         // aux notes sous la matrice, qui ne sont pas des affiches
+        // Joueur : un nom et au moins un score, ou une ligne encore vide (matrice en
+        // cours de remplissage). Un mot dans une case (« gamble ») compte comme illisible.
         val isPlayerRow = { r: List<String> ->
-            r.getOrElse(0) { "" }.let { it.isNotEmpty() && !isValue(it) } && cols.any { isValue(r.getOrElse(it) { "" }) }
+            r.getOrElse(0) { "" }.let { it.isNotEmpty() && !isValue(it) } &&
+                (cols.any { isValue(r.getOrElse(it) { "" }) } || cols.all { r.getOrElse(it) { "" }.isEmpty() })
         }
         val first = body.indexOfFirst(isPlayerRow)
         val rows = if (first < 0) emptyList() else body.drop(first).takeWhile(isPlayerRow)
         if (rows.isEmpty()) throw ImportException("Aucune ligne de scores trouvée sous l'en-tête")
-        // Une colonne d'en-tête sans aucune valeur (ex. « Faction ») n'est pas un adversaire
-        val textCols = cols.filter { c -> rows.none { isValue(it.getOrElse(c) { "" }) } }
+        if (rows.none { r -> cols.any { isValue(r.getOrElse(it) { "" }) } }) throw ImportException("Aucun score saisi")
+        // Une colonne de texte (ex. « Faction ») n'est pas un adversaire ; une colonne
+        // encore vide, si (adversaire pas encore estimé)
+        val textCols = cols.filter { c ->
+            rows.none { isValue(it.getOrElse(c) { "" }) } && rows.any { it.getOrElse(c) { "" }.isNotEmpty() }
+        }
         cols = cols - textCols.toSet()
         if (cols.isEmpty()) throw ImportException("Aucune colonne de scores")
         // Colonne de texte avant les scores = factions de nos joueurs
@@ -194,7 +206,10 @@ object MatrixImport {
             if (f.isNotEmpty() && p.faction.isEmpty()) p.copy(faction = f) else p
         }
         val corner = header[0].takeIf { it.isNotEmpty() && !isValue(it) }
-        return finish(ours, theirs, scores, scale, "grille", warnings, corner)
+        val allZero = raw.flatten().filter { isValue(it) }.all { toPoints(it, scale, maxScore, range) == 0.0 }
+        return finish(ours, theirs, scores, scale, "grille", warnings, corner, allZero).let {
+            MatrixImport.Result(it.ourPlayers, it.theirPlayers, it.scores, it.scale, it.layout, it.warnings, it.cornerName, it.allZero, rows.size, cols.size)
+        }
     }
 
     private fun parseLong(table: List<List<String>>, maxScore: Double, forced: Scale): Result {
@@ -227,12 +242,12 @@ object MatrixImport {
 
     private fun finish(
         ours: List<Player>, theirs: List<Player>, scores: List<List<Double>>, scale: Scale,
-        layout: String, warnings: MutableList<String>, corner: String? = null
+        layout: String, warnings: MutableList<String>, corner: String? = null, allZero: Boolean = false
     ): Result {
         val n = ours.size
         if (n < 4) throw ImportException("Seulement $n joueur(s) trouvé(s)")
         if (n !in setOf(4, 6, 8)) warnings += "$n joueurs : l'app gère 4, 6 ou 8 — ajuste la taille avant d'analyser"
-        return Result(ours, theirs, scores, scale, layout, warnings, corner)
+        return Result(ours, theirs, scores, scale, layout, warnings, corner, allZero)
     }
 
     private fun symbolRange(values: List<String>): Int {
@@ -259,6 +274,40 @@ object MatrixImport {
     fun detectStart(rows: List<List<String>>): Pair<Int, Int> {
         fun cell(r: Int, c: Int) = rows.getOrNull(r)?.getOrNull(c)?.trim().orEmpty()
         fun text(r: Int, c: Int) = cell(r, c).let { it.isNotEmpty() && !isValue(it) }
+        fun playerCells(r: Int, cols: IntRange) = cols.any { isValue(cell(r, it)) } || cols.all { cell(r, it).isEmpty() }
+
+        // 1) Par l'en-tête : ≥ 4 cellules de texte consécutives (adversaires) avec
+        //    ≥ 4 noms de joueurs en dessous. Marche même sur une matrice presque vide.
+        fun fromHeader(r: Int, a: Int, b: Int): Pair<Int, Int>? {
+            for (nameCol in listOf(a, a - 1)) {
+                if (nameCol < 0 || b - nameCol < 4) continue
+                val scoreCols = (nameCol + 1)..b
+                var k = r + 1
+                // Lignes de texte sous l'en-tête : factions, missions / déploiements
+                var skipped = 0
+                while (skipped < 2 && k < rows.size && scoreCols.none { isValue(cell(k, it)) } && scoreCols.any { text(k, it) }) { k++; skipped++ }
+                val players = ArrayList<Int>()
+                while (k < rows.size && text(k, nameCol) && playerCells(k, scoreCols)) { players += k; k++ }
+                if (players.size < 4 || players.none { p -> scoreCols.any { isValue(cell(p, it)) } }) continue
+                // Colonne de texte à gauche des noms (ex. factions puis noms) : on remonte
+                var left = nameCol
+                while (left - 1 >= 0 && nameCol - left < 2 && players.count { text(it, left - 1) } * 2 >= players.size) left--
+                return (r + 1) to (left + 1)
+            }
+            return null
+        }
+        for (r in rows.indices) {
+            var c = 0
+            while (c < rows[r].size) {
+                if (!text(r, c)) { c++; continue }
+                var e = c
+                while (text(r, e + 1)) e++
+                if (e - c + 1 >= 4) fromHeader(r, c, e)?.let { return it }
+                c = e + 1
+            }
+        }
+
+        // 2) Par les valeurs
         val valueCols = rows.map { r -> r.indices.filter { isValue(r[it]) } }
 
         // Grille : lignes portant au moins 4 valeurs

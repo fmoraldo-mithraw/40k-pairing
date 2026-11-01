@@ -130,4 +130,42 @@ class WorkbookImportTest {
         val d = AppData(settings = Settings(defaultTeam = "Mon Club", autoStart = false, startRow = 3, startCol = 2))
         assertEquals(d.settings, Store.fromJson(Store.toJson(d)).settings)
     }
+
+    /** Ligne de missions / déploiements sous les factions, matrice encore à moitié vide. */
+    private val missionsSheet = listOf(
+        listOf(), listOf(),
+        listOf("", "Les Verts", "Daemons", "Necrons", "Custodes", "Dark Angels", "Drukhari", "Knights"),
+        listOf("", "", "Purge the Foe", "Reconnaissance", "Take and Hold", "Take and Hold", "Disruption", "Priority Assets"),
+        listOf("", "Alpha", "6", "12", "14", "2", "2", "12"),
+        listOf("", "Bravo"), listOf("", "Charlie"), listOf("", "Delta"), listOf("", "Echo"),
+        listOf("", "Fox", "4", "13", "gamble", "5", "", "11"),
+        listOf(), listOf(),
+        listOf("", "0", "0/1"), listOf("", "1", "2/5"), listOf("", "5", "16+")
+    )
+
+    @Test
+    fun ligneDeMissionsEtMatriceIncomplete() {
+        assertEquals(3 to 2, MatrixImport.detectStart(missionsSheet))
+        val r = WorkbookImport.analyze(listOf(WorkbookImport.Sheet("Les Verts", missionsSheet)), Settings(), MatrixImport.Scale.AUTO, 20.0, "x").single()
+        val res = r.result!!
+        assertEquals(6, res.size)
+        assertEquals(listOf("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Fox"), res.ourPlayers.map { it.name })
+        // La mission s'affiche sous la faction adverse
+        assertEquals(Player("Daemons", "Purge the Foe"), res.theirPlayers[0])
+        assertEquals(listOf(6.0, 12.0, 14.0, 2.0, 2.0, 12.0), res.scores[0])
+        assertEquals(List(6) { 10.0 }, res.scores[1]) // joueur pas encore estimé
+        assertEquals(listOf(4.0, 13.0, 10.0, 5.0, 10.0, 11.0), res.scores[5]) // « gamble » et case vide → 10
+    }
+
+    @Test
+    fun tableauxDeBordIgnores() {
+        val zeros = listOf(listOf(), listOf("", "", "", "", "", "Estimé", "Réel", "Diff", "", "", "", "Diff estimé", "Diff positif", "Diff négatif", "Diff moyen", "Diff median", "Points total")) +
+            listOf("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Fox").map { listOf("", "", "", it, "", "0", "", "0", "", "", it, "0", "0", "0", "0", "0", "0") }
+        val stats = listOf(listOf("", "Diff estimé", "Diff positif", "Diff négatif", "Diff moyen", "Diff median", "Points total", "Estimé total")) +
+            listOf("Alpha", "Bravo", "Charlie", "Delta", "Echo", "Fox").map { listOf(it, "4.4", "0.4", "4", "0.88", "1", "6.6", "12") }
+        val res = WorkbookImport.analyze(
+            listOf(WorkbookImport.Sheet("Dash", zeros), WorkbookImport.Sheet("Stats", stats)), Settings(), MatrixImport.Scale.AUTO, 20.0, "x"
+        )
+        assertTrue(res.none { it.ok })
+    }
 }
