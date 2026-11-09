@@ -19,6 +19,7 @@ import com.pairing40k.app.engine.Assignment
 import com.pairing40k.app.engine.PairingSolver
 import com.pairing40k.app.engine.PairingState
 import com.pairing40k.app.engine.Phase
+import com.pairing40k.app.engine.Reliability
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,7 +32,10 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Résultat d'analyse d'une matrice : le solveur reste chaud pour le pairing en direct. */
+/**
+ * Résultat d'analyse d'une matrice : le solveur reste chaud pour le pairing en direct.
+ * [scores] = scores utilisés par le calcul (scores serrés atténués selon les réglages).
+ */
 class Analysis(
     val matchupId: String,
     val scores: List<List<Double>>,
@@ -107,7 +111,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             pairingFor = a.id
             _pairing.value = listOf(PairingState.start(a.size))
         }
-        if (before.active.id != a.id || before.active.scores != a.scores) analyze()
+        if (before.active.id != a.id || before.active.scores != a.scores ||
+            before.settings.closeScores != after.settings.closeScores) analyze()
     }
 
     fun updateMatchup(f: (Matchup) -> Matchup) = update { d ->
@@ -142,18 +147,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val m = _data.value.active
         analysisJob?.cancel()
         if (m.size !in setOf(4, 6, 8)) { _analysis.value = null; return }
-        if (_analysis.value?.let { it.matchupId == m.id && it.scores == m.scores } == true) return
+        val scores = Reliability.adjust(m.scores, m.maxScore, _data.value.settings.closeScores.keep)
+        if (_analysis.value?.let { it.matchupId == m.id && it.scores == scores } == true) return
         _analysis.value = null
         analysisJob = viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
-                val solver = PairingSolver(m.scores, m.maxScore)
+                val solver = PairingSolver(scores, m.maxScore)
                 val full = solver.fullMask
                 Analysis(
-                    m.id, m.scores, solver,
+                    m.id, scores, solver,
                     solver.stateValue(full, full),
                     solver.stateValue(full, full, PairingSolver.Mode.SECURE),
-                    Assignment.best(m.scores),
-                    Assignment.worst(m.scores),
+                    Assignment.best(scores),
+                    Assignment.worst(scores),
                     solver.matchProbabilities()
                 )
             }

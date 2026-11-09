@@ -72,8 +72,21 @@ data class HistoryEntry(
  * Réglages persistés : nom de notre équipe pour les nouvelles matrices, et
  * position par défaut de la matrice dans les fichiers importés (1 = A / 1re ligne).
  */
+/**
+ * Confiance dans les scores serrés (matrice remplie au feeling) : [keep] = part
+ * de l'écart à l'égalité conservée tout près de 10/20 ; les gros écarts sont
+ * toujours gardés tels quels (voir engine.Reliability).
+ */
+enum class CloseScores(val label: String, val keep: Double) {
+    RAW("Tels quels", 1.0),
+    SOFT("Atténués", 0.4),
+    STRONG("Très atténués", 0.15)
+}
+
 data class Settings(
     val defaultTeam: String = "Nous",
+    /** Les scores proches de l'égalité sont souvent du feeling : on les rapproche de l'égalité. */
+    val closeScores: CloseScores = CloseScores.SOFT,
     /** Début de matrice détecté automatiquement ; sinon [startRow] / [startCol]. */
     val autoStart: Boolean = true,
     val startRow: Int = 1,

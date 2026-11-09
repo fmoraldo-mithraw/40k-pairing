@@ -93,7 +93,7 @@ fun AnalysisScreen(vm: AppViewModel) {
         Section("Contribution par joueur", subtitle = "Points attendus de chaque joueur, et son adversaire le plus probable.") {
             m.ourPlayers.forEachIndexed { i, p ->
                 val row = a.probabilities[i]
-                val exp = row.indices.sumOf { row[it] * m.scores[i][it] }
+                val exp = row.indices.sumOf { row[it] * a.scores[i][it] }
                 val likely = row.indices.maxByOrNull { row[it] } ?: 0
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(p.label, color = Bone, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)

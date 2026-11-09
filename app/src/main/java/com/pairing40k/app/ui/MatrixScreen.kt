@@ -72,6 +72,7 @@ import com.pairing40k.app.AppViewModel
 import com.pairing40k.app.data.MatrixImport
 import com.pairing40k.app.data.Matchup
 import com.pairing40k.app.data.Player
+import com.pairing40k.app.data.CloseScores
 import com.pairing40k.app.data.Settings
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
@@ -177,6 +178,19 @@ fun MatrixScreen(vm: AppViewModel) {
                 if (t.isNotBlank()) vm.updateSettings { it.copy(defaultTeam = t.trim()) }
             }, label = { Text("Nom de notre équipe (par défaut)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             TextButton({ vm.applyDefaultTeamEverywhere() }) { Text("Appliquer à toutes les matrices") }
+            Text("Scores serrés (matrice remplie au feeling)", color = Muted, fontSize = 12.sp)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CloseScores.values().forEach { c ->
+                    FilterChip(selected = data.settings.closeScores == c,
+                        onClick = { vm.updateSettings { it.copy(closeScores = c) } }, label = { Text(c.label) })
+                }
+            }
+            Text(
+                "Un 12 ou un 8 tient souvent de l'impression, alors qu'un gros écart (≤ ${fmt1(m.maxScore / 4)} ou ≥ ${fmt1(m.maxScore * 3 / 4)}) " +
+                    "est en général une vraie lecture du match. « Atténués » rapproche les scores serrés de l'égalité pour le calcul " +
+                    "(la matrice affichée ne change pas) : le pairing cherche d'abord à placer les gros écarts.",
+                color = Muted, fontSize = 11.sp
+            )
             Text("Début de la matrice dans les fichiers importés", color = Muted, fontSize = 12.sp)
             StartPositionControls(data.settings) { st -> vm.updateSettings { st } }
         }
