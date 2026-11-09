@@ -1,6 +1,7 @@
 package com.pairing40k.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -95,6 +96,9 @@ fun PairingScreen(vm: AppViewModel) {
     }
 }
 
+/** Nombre de manches : 2 matchs par manche, puis 4 d'un coup à la dernière. */
+private fun roundsFor(n: Int) = (n - 4) / 2 + 1
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StatusCard(
@@ -111,13 +115,10 @@ private fun StatusCard(
         }
     }
     val total = m.maxScore * m.size
-    val title = when (st.phase) {
-        Phase.DEFENDERS -> "Manche ${st.round} · défenseurs"
-        Phase.ATTACKERS -> "Manche ${st.round} · attaquants"
-        Phase.CHOICES -> "Manche ${st.round} · choix des défenseurs"
-        Phase.DONE -> "Pairing terminé"
-    }
-    Section(title, subtitle = if (st.phase != Phase.DONE) "${st.remaining} joueurs restants de chaque côté" + if (st.isLastRound) " — dernière manche : refusés et oubliés jouent entre eux" else "" else null) {
+    val title = if (st.phase == Phase.DONE) "Pairing terminé"
+        else "Manche ${st.round} / ${roundsFor(m.size)}" + if (st.isLastRound) " · dernière" else ""
+    Section(title, subtitle = if (st.phase != Phase.DONE) "${st.remaining} joueurs restants de chaque côté" else null) {
+        if (st.phase != Phase.DONE) StepTracker(st.phase)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Stat("Projection", fmt1(fixed + rest), color = scoreColor(fixed + rest, total), sub = "sur ${fmt1(total)}")
             Stat("Déjà acquis", fmt1(fixed), sub = "${st.games.size} match(s)")
@@ -137,6 +138,62 @@ private fun StatusCard(
     }
 }
 
+/** Les 3 étapes d'une manche, l'étape en cours en or. */
+@Composable
+private fun StepTracker(phase: Phase) {
+    val steps = listOf(Phase.DEFENDERS to "Défenseurs", Phase.ATTACKERS to "Attaquants", Phase.CHOICES to "Choix")
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        steps.forEachIndexed { k, (p, label) ->
+            val current = p == phase
+            val done = p.ordinal < phase.ordinal
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(6.dp))
+                    .background(if (current) Gold else Color(0x22FFFFFF)).padding(vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    (if (done) "✓ " else "${k + 1}. ") + label,
+                    color = if (current) Color.Black else Muted,
+                    fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 13.sp, maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/** Consigne de l'étape en cours, en clair. */
+@Composable
+private fun Instruction(text: String) {
+    Text(
+        text, color = Bone, fontSize = 14.sp,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp)).background(Color(0x14FFFFFF)).padding(10.dp)
+    )
+}
+
+/**
+ * Rappel bien visible de l'adversaire : « Contre leur défenseur — Paul (Orks) ».
+ * [color] = couleur du camp de [who].
+ */
+@Composable
+private fun VersusBanner(caption: String, who: String, color: Color) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(color.copy(alpha = 0.15f))
+            .border(1.dp, color.copy(alpha = 0.7f), RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("⚔", color = color, fontSize = 18.sp, modifier = Modifier.padding(end = 8.dp))
+        Column {
+            Text(caption, color = Muted, fontSize = 11.sp)
+            Text(who, color = color, fontWeight = FontWeight.Bold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** Score d'un joueur face à l'adversaire rappelé, pour choisir d'un coup d'œil. */
+private fun withScore(name: String, v: Double) = "$name ${fmt1(v)}"
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DefendersStep(m: Matchup, a: Analysis, st: PairingState, training: Boolean, onNext: (PairingState) -> Unit) {
@@ -144,7 +201,11 @@ private fun DefendersStep(m: Matchup, a: Analysis, st: PairingState, training: B
     var ours by remember(st) { mutableStateOf<Int?>(null) }
     var theirs by remember(st) { mutableStateOf<Int?>(null) }
 
-    Section("Notre défenseur", subtitle = "Espér. = points d'équipe attendus · Plancher = pire cas si l'adversaire devine ton choix.") {
+    Instruction(
+        "Chaque équipe pose un défenseur face cachée, puis on révèle en même temps." +
+            if (training) " Choisis le nôtre et valide." else " ① Choisis le nôtre. ② Après révélation, touche le leur. ③ Valide."
+    )
+    Section("① Notre défenseur", subtitle = "Espér. = points d'équipe attendus · Plancher = pire cas si l'adversaire devine ton choix.") {
         Advice("pose", an.ours) { m.ourPlayers[it].name }
         OptionHeader()
         an.ours.sortedByDescending { it.probability * 1000 + it.expected }.forEach {
@@ -155,7 +216,7 @@ private fun DefendersStep(m: Matchup, a: Analysis, st: PairingState, training: B
             Icon(Icons.Rounded.Casino, null); Text(" Tirer notre défenseur")
         }
     }
-    Section("Leur défenseur", subtitle = if (training) "Choisi par l'adversaire virtuel à la validation." else "« Nous » = nos points d'équipe attendus s'il le pose.") {
+    Section("② Leur défenseur", subtitle = if (training) "Choisi par l'adversaire virtuel à la validation." else "Touche le défenseur qu'ils ont révélé. « Nous » = nos points attendus s'il le pose.") {
         if (!training) Prediction("poseront", an.theirs) { m.theirPlayers[it].name }
         OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
         an.theirs.sortedByDescending { it.probability }.forEach {
@@ -163,7 +224,16 @@ private fun DefendersStep(m: Matchup, a: Analysis, st: PairingState, training: B
                 highlight = theirs == it.option, onClick = if (training) null else ({ theirs = it.option }))
         }
     }
-    ValidateButton(enabled = ours != null && (training || theirs != null)) {
+    ValidateButton(
+        missing = when {
+            ours == null -> "Choisis notre défenseur"
+            !training && theirs == null -> "Touche leur défenseur"
+            else -> null
+        },
+        summary = ours?.let { o ->
+            "Défenseurs : ${m.ourPlayers[o].name} (nous)" + (theirs?.takeIf { !training }?.let { " · ${m.theirPlayers[it].name} (eux)" } ?: "")
+        }
+    ) {
         val t = if (training) draw(an.theirs) else theirs!!
         onNext(st.withDefenders(ours!!, t))
     }
@@ -175,36 +245,53 @@ private fun AttackersStep(m: Matchup, a: Analysis, st: PairingState, training: B
     val an = remember(st) { a.solver.analyzeAttackers(st.ourLeft, st.theirLeft, st.ourDefender, st.theirDefender) }
     var ours by remember(st) { mutableStateOf<List<Int>>(emptyList()) }
     var theirs by remember(st) { mutableStateOf<List<Int>>(emptyList()) }
+    val ourDef = m.ourPlayers[st.ourDefender]
+    val theirDef = m.theirPlayers[st.theirDefender]
+    // Score de chacun face au défenseur qu'il attaque
+    val ourAtk = { p: Int -> withScore(m.ourPlayers[p].name, m.scores[p][st.theirDefender]) }
+    val theirAtk = { q: Int -> withScore(m.theirPlayers[q].name, m.scores[st.ourDefender][q]) }
 
-    Section("Défenseurs révélés") {
-        Row {
-            Text(m.ourPlayers[st.ourDefender].label, color = OurRed, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("vs", color = Muted)
-            Text(m.theirPlayers[st.theirDefender].label, color = TheirBlue, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f).padding(start = 12.dp))
-        }
-    }
-    Section("Nos 2 attaquants", subtitle = "Contre ${m.theirPlayers[st.theirDefender].name}. Touche une paire ou choisis les joueurs.") {
-        Advice("envoie", an.ours) { p -> p.joinToString(" + ") { m.ourPlayers[it].name } }
+    Instruction(
+        "Chaque équipe envoie 2 attaquants contre le défenseur d'en face : nos attaquants vont sur ${theirDef.name}, " +
+            "les leurs sur ${ourDef.name}. Les chiffres = nos points estimés dans ce match."
+    )
+    Section("① Nos 2 attaquants") {
+        VersusBanner("Ils attaquent leur défenseur", theirDef.label, TheirBlue)
+        Advice("envoie", an.ours, suffix = " sur ${theirDef.name}") { p -> p.joinToString(" + ") { m.ourPlayers[it].name } }
         OptionHeader()
         an.ours.sortedByDescending { it.probability * 1000 + it.expected }.take(8).forEach { o ->
-            OptionRow(o.option.joinToString(" + ") { m.ourPlayers[it].name }, o.probability, o.expected, o.floor, OurRed,
+            OptionRow(o.option.joinToString(" + ") { ourAtk(it) }, o.probability, o.expected, o.floor, OurRed,
                 highlight = ours.sorted() == o.option, dimmed = o.probability < 0.01, onClick = { ours = o.option })
         }
-        PlayerPicker(PairingSolver.bits(st.ourLeft).filter { it != st.ourDefender }, ours, { m.ourPlayers[it].name }, OurRed) { ours = it }
+        Text("Ou choisis les 2 joueurs (score contre ${theirDef.name}) :", color = Muted, fontSize = 12.sp)
+        PlayerPicker(PairingSolver.bits(st.ourLeft).filter { it != st.ourDefender }, ours, ourAtk, OurRed) { ours = it }
         Button({ ours = draw(an.ours) }, colors = ButtonDefaults.buttonColors(containerColor = OurRed)) {
             Icon(Icons.Rounded.Casino, null); Text(" Tirer nos attaquants")
         }
     }
-    Section("Leurs 2 attaquants", subtitle = if (training) "Choisis par l'adversaire virtuel à la validation." else "Contre ${m.ourPlayers[st.ourDefender].name}.") {
-        if (!training) Prediction("enverront", an.theirs) { p -> p.joinToString(" + ") { m.theirPlayers[it].name } }
+    Section("② Leurs 2 attaquants", subtitle = if (training) "Choisis par l'adversaire virtuel à la validation." else "Touche les 2 joueurs qu'ils ont envoyés.") {
+        VersusBanner("Ils attaquent notre défenseur", ourDef.label, OurRed)
+        if (!training) Prediction("enverront", an.theirs, suffix = " sur ${ourDef.name}") { p -> p.joinToString(" + ") { m.theirPlayers[it].name } }
         OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
         an.theirs.sortedByDescending { it.probability }.take(6).forEach { o ->
-            OptionRow(o.option.joinToString(" + ") { m.theirPlayers[it].name }, o.probability, o.expected, null, TheirBlue,
+            OptionRow(o.option.joinToString(" + ") { theirAtk(it) }, o.probability, o.expected, null, TheirBlue,
                 highlight = theirs.sorted() == o.option, onClick = if (training) null else ({ theirs = o.option }))
         }
-        if (!training) PlayerPicker(PairingSolver.bits(st.theirLeft).filter { it != st.theirDefender }, theirs, { m.theirPlayers[it].name }, TheirBlue) { theirs = it }
+        if (!training) {
+            Text("Ou choisis les 2 joueurs (notre score avec ${ourDef.name}) :", color = Muted, fontSize = 12.sp)
+            PlayerPicker(PairingSolver.bits(st.theirLeft).filter { it != st.theirDefender }, theirs, theirAtk, TheirBlue) { theirs = it }
+        }
     }
-    ValidateButton(enabled = ours.size == 2 && (training || theirs.size == 2)) {
+    ValidateButton(
+        missing = when {
+            ours.size < 2 -> "Choisis nos 2 attaquants (${ours.size}/2)"
+            !training && theirs.size < 2 -> "Touche leurs 2 attaquants (${theirs.size}/2)"
+            else -> null
+        },
+        summary = if (ours.size == 2) "${ours.joinToString(" + ") { m.ourPlayers[it].name }} → ${theirDef.name}" +
+            (if (!training && theirs.size == 2) "\n${theirs.joinToString(" + ") { m.theirPlayers[it].name }} → ${ourDef.name}" else "")
+        else null
+    ) {
         val t = if (training) draw(an.theirs) else theirs
         onNext(st.withAttackers(ours, t))
     }
@@ -217,24 +304,36 @@ private fun ChoicesStep(m: Matchup, a: Analysis, st: PairingState, training: Boo
     }
     var ours by remember(st) { mutableStateOf<Int?>(null) }
     var theirs by remember(st) { mutableStateOf<Int?>(null) }
+    val ourDef = m.ourPlayers[st.ourDefender]
+    val theirDef = m.theirPlayers[st.theirDefender]
 
-    Section("${m.ourPlayers[st.ourDefender].name} choisit son adversaire", subtitle = "Notre défenseur prend l'un de leurs deux attaquants ; l'autre retourne dans le pool" +
-        if (st.isLastRound) " (et jouera contre notre attaquant refusé)." else ".") {
-        Advice("${m.ourPlayers[st.ourDefender].name} prend", an.ours) { m.theirPlayers[it].name }
+    Instruction(
+        "Chaque défenseur garde un des 2 attaquants d'en face ; l'autre " +
+            (if (st.isLastRound) "joue contre l'attaquant refusé d'en face, et les 2 oubliés jouent ensemble."
+            else "retourne dans le pool.") + " Les chiffres = nos points estimés dans ce match."
+    )
+    Section("① Notre défenseur choisit") {
+        VersusBanner("${ourDef.name} choisit entre leurs attaquants",
+            st.theirAttackers.joinToString("  ou  ") { m.theirPlayers[it].name }, TheirBlue)
+        Advice("${ourDef.name} prend", an.ours) { m.theirPlayers[it].name }
         OptionHeader()
         an.ours.forEach {
-            OptionRow(m.theirPlayers[it.option].label + "  (${fmt1(m.scores[st.ourDefender][it.option])})", it.probability, it.expected, it.floor, OurRed,
+            OptionRow("${ourDef.name} vs ${m.theirPlayers[it.option].label} · ${fmt1(m.scores[st.ourDefender][it.option])}",
+                it.probability, it.expected, it.floor, OurRed,
                 highlight = ours == it.option, dimmed = it.probability < 0.01, onClick = { ours = it.option })
         }
         Button({ ours = draw(an.ours) }, colors = ButtonDefaults.buttonColors(containerColor = OurRed)) {
             Icon(Icons.Rounded.Casino, null); Text(" Tirer")
         }
     }
-    Section("${m.theirPlayers[st.theirDefender].name} choisit parmi nos attaquants", subtitle = if (training) "Choix de l'adversaire virtuel à la validation." else "Saisis son choix.") {
+    Section("② Leur défenseur choisit", subtitle = if (training) "Choix de l'adversaire virtuel à la validation." else "Touche l'attaquant qu'il a pris.") {
+        VersusBanner("${theirDef.name} choisit entre nos attaquants",
+            st.ourAttackers.joinToString("  ou  ") { m.ourPlayers[it].name }, OurRed)
         if (!training) Prediction("prendront", an.theirs) { m.ourPlayers[it].name }
         OptionHeader(probLabel = "Prévision", expectedLabel = "Nous", floorLabel = null)
         an.theirs.forEach {
-            OptionRow(m.ourPlayers[it.option].label + "  (${fmt1(m.scores[it.option][st.theirDefender])})", it.probability, it.expected, null, TheirBlue,
+            OptionRow("${m.ourPlayers[it.option].label} vs ${theirDef.name} · ${fmt1(m.scores[it.option][st.theirDefender])}",
+                it.probability, it.expected, null, TheirBlue,
                 highlight = theirs == it.option, onClick = if (training) null else ({ theirs = it.option }))
         }
     }
@@ -242,7 +341,17 @@ private fun ChoicesStep(m: Matchup, a: Analysis, st: PairingState, training: Boo
         // Aperçu des 4 derniers matchs, oubliés compris
         Section("Aperçu") { GamesList(m, st.withChoices(ours!!, theirs!!).games.drop(st.games.size)) }
     }
-    ValidateButton(enabled = ours != null && (training || theirs != null)) {
+    ValidateButton(
+        missing = when {
+            ours == null -> "Choisis l'adversaire de ${ourDef.name}"
+            !training && theirs == null -> "Touche le choix de ${theirDef.name}"
+            else -> null
+        },
+        summary = ours?.let { o ->
+            "${ourDef.name} vs ${m.theirPlayers[o].name}" +
+                (theirs?.takeIf { !training }?.let { "\n${m.ourPlayers[it].name} vs ${theirDef.name}" } ?: "")
+        }
+    ) {
         val t = if (training) draw(an.theirs) else theirs!!
         onNext(st.withChoices(ours!!, t))
     }
@@ -323,11 +432,15 @@ private fun PlayerPicker(players: List<Int>, selected: List<Int>, name: (Int) ->
     }
 }
 
+/** Bouton de validation : dit ce qui manque, puis récapitule ce qui sera validé. */
 @Composable
-private fun ValidateButton(enabled: Boolean, onClick: () -> Unit) {
-    Button(
-        onClick, enabled = enabled,
-        colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Color.Black),
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)
-    ) { Text("Révéler et valider", fontWeight = FontWeight.Bold) }
+private fun ValidateButton(missing: String?, summary: String?, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+        if (missing == null && summary != null) Text(summary, color = Bone, fontSize = 13.sp, modifier = Modifier.padding(bottom = 4.dp))
+        Button(
+            onClick, enabled = missing == null,
+            colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Color.Black),
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(missing ?: "Révéler et valider", fontWeight = FontWeight.Bold) }
+    }
 }

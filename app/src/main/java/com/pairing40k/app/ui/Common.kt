@@ -90,7 +90,8 @@ fun OptionRow(
     highlight: Boolean = false, dimmed: Boolean = false, onClick: (() -> Unit)? = null
 ) {
     val mod = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-        .background(if (highlight) color.copy(alpha = 0.18f) else Color.Transparent)
+        .background(if (highlight) color.copy(alpha = 0.22f) else Color.Transparent)
+        .border(1.dp, if (highlight) color else Color.Transparent, RoundedCornerShape(6.dp))
         .let { if (onClick != null) it.clickable(onClick = onClick) else it }
         .padding(horizontal = 6.dp, vertical = 4.dp)
         .alpha(if (dimmed && !highlight) 0.4f else 1f)
@@ -129,14 +130,14 @@ private fun joinOr(names: List<String>) =
  * bonnes les unes que les autres ; on alterne pour rester imprévisible.
  */
 @Composable
-fun <T> Advice(verb: String, options: List<OptionEval<T>>, name: (T) -> String) {
+fun <T> Advice(verb: String, options: List<OptionEval<T>>, suffix: String = "", name: (T) -> String) {
     val best = playable(options)
     if (best.isEmpty()) return
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Gold.copy(alpha = 0.14f))
             .border(1.dp, Gold.copy(alpha = 0.6f), RoundedCornerShape(8.dp)).padding(10.dp)
     ) {
-        Text("Conseil : $verb ${joinOr(best.map { name(it.option) })}", color = Gold, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+        Text("Conseil : $verb ${joinOr(best.map { name(it.option) })}$suffix", color = Gold, fontWeight = FontWeight.Bold, fontSize = 15.sp)
         Text(
             if (best.size == 1) "Le meilleur choix, quoi que fasse l'adversaire."
             else "Aussi bons les uns que les autres (même espérance). Ne joue pas toujours le même : " +
@@ -148,11 +149,11 @@ fun <T> Advice(verb: String, options: List<OptionEval<T>>, name: (T) -> String) 
 
 /** Prévision de ce que posera un adversaire qui joue bien. */
 @Composable
-fun <T> Prediction(verb: String, options: List<OptionEval<T>>, name: (T) -> String) {
+fun <T> Prediction(verb: String, options: List<OptionEval<T>>, suffix: String = "", name: (T) -> String) {
     val likely = playable(options)
     if (likely.isEmpty()) return
     Text(
-        "Prévision : ils $verb sans doute " + joinOr(likely.map { "${name(it.option)} (${pct(it.probability)})" }) +
+        "Prévision : ils $verb sans doute " + joinOr(likely.map { "${name(it.option)} (${pct(it.probability)})" }) + suffix +
             ". Touche ce qu'ils ont vraiment révélé.",
         color = TheirBlue, fontSize = 12.sp
     )
