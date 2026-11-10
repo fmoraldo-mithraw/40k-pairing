@@ -42,6 +42,10 @@ rapproche donc les scores serrés de l'égalité (12 compte ≈ 11,2) sans touch
 le pairing cherche d'abord à placer les matchs très déséquilibrés. Réglage dans l'onglet
 Matrice (*Tels quels* / *Atténués* / *Très atténués*) ; la matrice affichée ne change pas.
 
+**Pourquoi ce conseil ?** Sous chaque conseil, un cadre dépliable explique le choix : leur
+meilleure parade et le meilleur cas pour chaque option conseillée, les matchs probables de la
+manche, pourquoi alterner quand le conseil est un mélange, et ce que coûtent les autres options.
+
 > La stratégie optimale est souvent un *mélange* (ex. « défenseur A 60 %, B 40 % ») :
 > le bouton 🎲 tire la carte selon ces probabilités, pour rester imprévisible.
 

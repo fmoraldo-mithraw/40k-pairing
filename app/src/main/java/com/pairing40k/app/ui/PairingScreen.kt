@@ -197,6 +197,20 @@ private fun VersusBanner(caption: String, who: String, color: Color) {
     }
 }
 
+/** Points déjà acquis, dans l'échelle du calcul (comme la projection). */
+private fun acquired(a: Analysis, st: PairingState) = st.games.sumOf { a.scores[it.our][it.their] }
+
+/** Affiches d'un candidat défenseur contre leurs joueurs restants (scores de la matrice). */
+private fun defenderDetail(m: Matchup, st: PairingState, d: Int): List<String> {
+    val opp = PairingSolver.bits(st.theirLeft).sortedBy { m.scores[d][it] }
+    if (opp.size < 2) return emptyList()
+    fun show(l: List<Int>) = l.joinToString(", ") { "${m.theirPlayers[it].name} ${fmt1(m.scores[d][it])}" }
+    return listOf(
+        "Pires affiches : ${show(opp.take(2))} · meilleures : ${show(opp.takeLast(2).reversed())}",
+        "En défense, s'ils lui envoient ses 2 pires, il prend la moins mauvaise : environ ${fmt1(m.scores[d][opp[1]])}."
+    )
+}
+
 /** Score d'un joueur face à l'adversaire rappelé, pour choisir d'un coup d'œil. */
 private fun withScore(name: String, v: Double) = "$name ${fmt1(v)}"
 
@@ -213,6 +227,18 @@ private fun DefendersStep(m: Matchup, a: Analysis, st: PairingState, training: B
     )
     Section("① Notre défenseur", subtitle = "Espér. = points d'équipe attendus · Plancher = pire cas si l'adversaire devine ton choix.") {
         Advice("pose", an.ours) { m.ourPlayers[it].name }
+        WhyCard(
+            m, an, acquired(a, st), { m.ourPlayers[it].name }, { "poser " + m.theirPlayers[it].name },
+            context = listOf(
+                "Notre défenseur choisira son adversaire entre 2 attaquants… mais c'est l'adversaire qui choisit lesquels " +
+                    "lui envoyer : il enverra ceux contre qui il est le plus faible. Un bon défenseur a donc peu de mauvaises affiches ; " +
+                    "un joueur qui a 2 ou 3 très mauvais matchs est vulnérable en défense.",
+                "Le choix compte aussi pour la suite : qui reste dans le pool pour les manches suivantes. " +
+                    "Le calcul joue toutes les manches jusqu'au bout."
+            ),
+            detail = { d -> defenderDetail(m, st, d) },
+            outlook = { d -> a.solver.outlookDefender(st.ourLeft, st.theirLeft, d) }
+        )
         OptionHeader()
         an.ours.sortedByDescending { it.probability * 1000 + it.expected }.forEach {
             OptionRow(m.ourPlayers[it.option].label, it.probability, it.expected, it.floor, OurRed,
@@ -264,6 +290,27 @@ private fun AttackersStep(m: Matchup, a: Analysis, st: PairingState, training: B
     Section("① Nos 2 attaquants") {
         VersusBanner("Ils attaquent leur défenseur", theirDef.label, TheirBlue)
         Advice("envoie", an.ours, suffix = " sur ${theirDef.name}") { p -> p.joinToString(" + ") { m.ourPlayers[it].name } }
+        WhyCard(
+            m, an, acquired(a, st), { p -> p.joinToString(" + ") { m.ourPlayers[it].name } },
+            { q -> "envoyer " + q.joinToString(" + ") { m.theirPlayers[it].name } },
+            context = listOf(
+                "${theirDef.name} va garder celui de nos 2 attaquants qui l'arrange (a priori le moins bon pour nous) ; l'autre " +
+                    (if (st.isLastRound) "jouera contre leur attaquant refusé." else "retourne dans le pool pour la suite."),
+                "Nos scores contre ${theirDef.name} : " + PairingSolver.bits(st.ourLeft).filter { it != st.ourDefender }
+                    .sortedByDescending { m.scores[it][st.theirDefender] }
+                    .joinToString(" · ") { "${m.ourPlayers[it].name} ${fmt1(m.scores[it][st.theirDefender])}" },
+                "Envoyer 2 joueurs bons contre lui limite les dégâts ; y envoyer un joueur « sacrifiable » garde nos meilleurs pour la suite. " +
+                    "En même temps, ils envoient 2 attaquants sur ${ourDef.name}, qui choisira."
+            ),
+            detail = { p ->
+                val sc = p.sortedBy { m.scores[it][st.theirDefender] }
+                listOf(
+                    "Contre ${theirDef.name} : " + p.joinToString(" · ") { "${m.ourPlayers[it].name} ${fmt1(m.scores[it][st.theirDefender])}" } +
+                        " → il gardera a priori ${m.ourPlayers[sc.first()].name}"
+                )
+            },
+            outlook = { p -> a.solver.outlookAttackers(st.ourLeft, st.theirLeft, st.ourDefender, st.theirDefender, p) }
+        )
         OptionHeader()
         an.ours.sortedByDescending { it.probability * 1000 + it.expected }.take(8).forEach { o ->
             OptionRow(o.option.joinToString(" + ") { ourAtk(it) }, o.probability, o.expected, o.floor, OurRed,
@@ -322,6 +369,21 @@ private fun ChoicesStep(m: Matchup, a: Analysis, st: PairingState, training: Boo
         VersusBanner("${ourDef.name} choisit entre leurs attaquants",
             st.theirAttackers.joinToString("  ou  ") { m.theirPlayers[it].name }, TheirBlue)
         Advice("${ourDef.name} prend", an.ours) { m.theirPlayers[it].name }
+        WhyCard(
+            m, an, acquired(a, st), { "${ourDef.name} prend ${m.theirPlayers[it].name}" }, { "prendre " + m.ourPlayers[it].name },
+            context = listOf(
+                "${ourDef.name} affronte l'attaquant qu'il garde ; l'autre " +
+                    (if (st.isLastRound) "joue contre notre attaquant refusé, et les 2 oubliés jouent ensemble."
+                    else "retourne dans leur pool et pourra être posé contre nous plus tard."),
+                "Le meilleur score immédiat n'est donc pas toujours le meilleur choix : le calcul compte aussi ce que devient l'attaquant refusé.",
+                "En même temps, ${theirDef.name} choisit entre " + st.ourAttackers.joinToString(" et ") { m.ourPlayers[it].name } + "."
+            ),
+            detail = { t ->
+                val other = st.theirAttackers.first { it != t }
+                listOf("${ourDef.name} vs ${m.theirPlayers[t].name} : ${fmt1(m.scores[st.ourDefender][t])} · refusé : ${m.theirPlayers[other].name}")
+            },
+            outlook = { t -> a.solver.outlookChoice(st.ourLeft, st.theirLeft, st.ourDefender, st.theirDefender, st.ourAttackers, st.theirAttackers, t) }
+        )
         OptionHeader()
         an.ours.forEach {
             OptionRow("${ourDef.name} vs ${m.theirPlayers[it.option].label} · ${fmt1(m.scores[st.ourDefender][it.option])}",

@@ -166,8 +166,84 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
             for (i in ours.indices) best = maxOf(best, secure[i][j])
             OptionEval(t, sol.col[j], exp, best)
         }
-        return StepAnalysis(sol.value, MatrixGame.maximin(secure), ourEvals, theirEvals)
+        return StepAnalysis(sol.value, MatrixGame.maximin(secure), ourEvals, theirEvals, nash)
     }
+
+    // ------------------------------------------------- matchs probables
+
+    /*
+     * Pour expliquer un choix : quels matchs se forment dans la manche en cours
+     * si on joue cette option, l'adversaire (qui ne la connaît pas) et les
+     * étapes suivantes jouant l'équilibre. Probabilités par match.
+     */
+
+    /** Matchs de la manche si notre défenseur est [d]. */
+    fun outlookDefender(a: Int, b: Int, d: Int): List<RoundMatch> {
+        val acc = HashMap<Long, Double>()
+        val theirs = bits(b)
+        val sol = MatrixGame.solve(defenderMatrix(a, b, Mode.NASH))
+        for (ei in theirs.indices) if (sol.col[ei] > 1e-9) attackersDist(a, b, d, theirs[ei], null, sol.col[ei], acc)
+        return toMatches(acc)
+    }
+
+    /** Matchs de la manche si nos attaquants sont [pair] (défenseurs [d] / [e] connus). */
+    fun outlookAttackers(a: Int, b: Int, d: Int, e: Int, pair: List<Int>): List<RoundMatch> {
+        val acc = HashMap<Long, Double>()
+        attackersDist(a, b, d, e, pair.sorted().toIntArray(), 1.0, acc)
+        return toMatches(acc)
+    }
+
+    /** Matchs de la manche si notre défenseur prend leur attaquant [pick]. */
+    fun outlookChoice(a: Int, b: Int, d: Int, e: Int, p: List<Int>, q: List<Int>, pick: Int): List<RoundMatch> {
+        val acc = HashMap<Long, Double>()
+        choiceDist(a, b, d, e, p.toIntArray(), q.toIntArray(), q.indexOf(pick), 1.0, acc)
+        return toMatches(acc)
+    }
+
+    private fun attackersDist(a: Int, b: Int, d: Int, e: Int, ourPair: IntArray?, w: Double, acc: HashMap<Long, Double>) {
+        val ourPairs = pairs(a and (1 shl d).inv())
+        val theirPairs = pairs(b and (1 shl e).inv())
+        val sol = MatrixGame.solve(attackersMatrix(a, b, d, e, Mode.NASH))
+        for (pi in ourPairs.indices) {
+            val pr = if (ourPair == null) sol.row[pi] else if (ourPairs[pi].contentEquals(ourPair)) 1.0 else 0.0
+            if (pr < 1e-9) continue
+            for (qi in theirPairs.indices) {
+                val pc = w * pr * sol.col[qi]
+                if (pc > 1e-9) choiceDist(a, b, d, e, ourPairs[pi], theirPairs[qi], -1, pc, acc)
+            }
+        }
+    }
+
+    /** [ourPick] : index dans [q] de l'attaquant pris par notre défenseur, −1 = à l'équilibre. */
+    private fun choiceDist(
+        a: Int, b: Int, d: Int, e: Int, p: IntArray, q: IntArray, ourPick: Int, w: Double, acc: HashMap<Long, Double>
+    ) {
+        val sol = MatrixGame.solve(Array(2) { i -> DoubleArray(2) { j -> choiceOutcome(a, b, d, e, p, q, i, j, Mode.NASH) } })
+        val row = if (ourPick < 0) sol.row else DoubleArray(2) { if (it == ourPick) 1.0 else 0.0 }
+        val last = Integer.bitCount(a) == 4
+        for (i in 0..1) for (j in 0..1) {
+            val pc = w * row[i] * sol.col[j]
+            if (pc < 1e-9) continue
+            addMatch(acc, d, q[i], pc)
+            addMatch(acc, p[j], e, pc)
+            if (last) {
+                val ra = p[1 - j]
+                val rb = q[1 - i]
+                addMatch(acc, ra, rb, pc)
+                val restA = a and (1 shl d).inv() and (1 shl p[j]).inv() and (1 shl ra).inv()
+                val restB = b and (1 shl e).inv() and (1 shl q[i]).inv() and (1 shl rb).inv()
+                addMatch(acc, lowest(restA), lowest(restB), pc)
+            }
+        }
+    }
+
+    private fun addMatch(acc: HashMap<Long, Double>, our: Int, their: Int, p: Double) {
+        val k = key(our, their)
+        acc[k] = (acc[k] ?: 0.0) + p
+    }
+
+    private fun toMatches(acc: HashMap<Long, Double>) =
+        acc.map { (k, p) -> RoundMatch((k shr 32).toInt(), k.toInt(), p) }.sortedByDescending { it.probability }
 
     // ------------------------------------------- probabilités des affiches
 
@@ -263,9 +339,17 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
  */
 class OptionEval<T>(val option: T, val probability: Double, val expected: Double, val floor: Double)
 
+/**
+ * [payoff][i][j] = nos points sur les matchs restants si on joue ours[i] et
+ * eux theirs[j] (suite jouée à l'équilibre) : sert à expliquer les choix.
+ */
 class StepAnalysis<O, T>(
     val value: Double,
     val secureValue: Double,
     val ours: List<OptionEval<O>>,
-    val theirs: List<OptionEval<T>>
+    val theirs: List<OptionEval<T>>,
+    val payoff: Array<DoubleArray>
 )
+
+/** Un match qui se forme dans la manche, avec sa probabilité. */
+class RoundMatch(val our: Int, val their: Int, val probability: Double)
