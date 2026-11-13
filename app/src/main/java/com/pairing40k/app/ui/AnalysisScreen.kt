@@ -71,6 +71,8 @@ fun AnalysisScreen(vm: AppViewModel) {
             Text(verdict, color = Bone, fontSize = 13.sp)
         }
 
+        if (a.scorers.isNotEmpty()) ScorersSection(m, a)
+
         Section(
             "Premier défenseur", subtitle = "Espér. = points d'équipe attendus · Plancher = pire cas si l'adversaire devine ton choix."
         ) {
@@ -171,6 +173,41 @@ private fun ProbabilityGrid(m: Matchup, a: Analysis) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Prix de la priorité aux marqueurs : total attendu avec / sans, et chances de
+ * chaque marqueur de tomber sur une de ses 2 meilleures affiches.
+ */
+@Composable
+private fun ScorersSection(m: Matchup, a: Analysis) {
+    val base = a.baseline
+    Section("Marqueurs ★", subtitle = "Le pairing cherche à placer vos marqueurs sur leurs meilleures affiches. Ce que ça change, en vrais points.") {
+        if (base == null) {
+            Text("Priorité à ×1 : rien ne change. Monte le poids dans Matrice › Réglages.", color = Muted, fontSize = 13.sp)
+            return@Section
+        }
+        val diff = a.value - base.value
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Stat("Avec priorité", fmt1(a.value), sub = "points d'équipe")
+            Stat("Sans", fmt1(base.value), sub = "pairing neutre")
+            Stat("Prix", (if (diff >= 0) "+" else "") + fmt1(diff), color = if (diff < -0.05) Color(0xFFE57373) else Color(0xFF6FBF73), sub = "points attendus")
+        }
+        a.scorers.forEach { i ->
+            val top = m.scores[i].indices.sortedByDescending { m.scores[i][it] }.take(2)
+            val with = top.sumOf { a.probabilities[i][it] }
+            val without = top.sumOf { base.probabilities[i][it] }
+            val expWith = m.scores[i].indices.sumOf { a.probabilities[i][it] * m.scores[i][it] }
+            val expWithout = m.scores[i].indices.sumOf { base.probabilities[i][it] * m.scores[i][it] }
+            Column(Modifier.padding(top = 6.dp)) {
+                Text("★ ${m.ourPlayers[i].name}", color = OurRed, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Meilleures affiches : " + top.joinToString(" / ") { "${m.theirPlayers[it].name} (${fmt1(m.scores[i][it])})" },
+                    color = Muted, fontSize = 12.sp)
+                Text("Chance d'en avoir une : ${pct(with)} (sans priorité ${pct(without)}) · " +
+                    "points attendus ${fmt1(expWith)} (sans ${fmt1(expWithout)})", color = Bone, fontSize = 13.sp)
             }
         }
     }

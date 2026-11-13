@@ -108,7 +108,7 @@ private fun StatusCard(
     val fixed = st.games.sumOf { m.scores[it.our][it.their] }
     val rest = remember(st, a) {
         when (st.phase) {
-        Phase.DEFENDERS -> a.solver.stateValue(st.ourLeft, st.theirLeft)
+        Phase.DEFENDERS -> a.solver.expectedValue(st.ourLeft, st.theirLeft)
         Phase.ATTACKERS -> a.solver.analyzeAttackers(st.ourLeft, st.theirLeft, st.ourDefender, st.theirDefender).value
         Phase.CHOICES -> a.solver.analyzeChoice(st.ourLeft, st.theirLeft, st.ourDefender, st.theirDefender, st.ourAttackers, st.theirAttackers).value
         Phase.DONE -> 0.0
@@ -133,6 +133,8 @@ private fun StatusCard(
                 Switch(training, onTraining, modifier = Modifier.padding(start = 4.dp))
             }
         }
+        if (a.baseline != null) Text("★ Priorité aux marqueurs ${a.scorers.joinToString { m.ourPlayers[it].name }} : les conseils cherchent à les placer sur leurs meilleures affiches.",
+            color = Gold, fontSize = 12.sp)
         if (training) Text("Mode entraînement : l'adversaire virtuel joue sa stratégie optimale (tirage aléatoire) quand tu valides.",
             color = Gold, fontSize = 12.sp)
     }
@@ -191,7 +193,7 @@ private fun VersusBanner(caption: String, who: String, color: Color) {
     }
 }
 
-/** Points déjà acquis, dans l'échelle du calcul (comme la projection). */
+/** Points déjà acquis (vrais points, comme la projection). */
 private fun acquired(a: Analysis, st: PairingState) = st.games.sumOf { a.scores[it.our][it.their] }
 
 /** Affiches d'un candidat défenseur contre leurs joueurs restants (scores de la matrice). */

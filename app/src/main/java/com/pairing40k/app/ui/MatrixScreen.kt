@@ -40,6 +40,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -164,7 +165,10 @@ fun MatrixScreen(vm: AppViewModel) {
         }
 
         Section("Matrice des scores estimés", subtitle = "Lignes : nos joueurs · colonnes : adversaires · 0-${fmt1(m.maxScore)} (${fmt1(m.maxScore / 2)} = égalité). Touche une case ou un nom pour modifier.") {
-            MatrixGrid(m, onCell = { i, j -> editCell = i to j }, onPlayer = { ours, i -> editPlayer = ours to i })
+            MatrixGrid(m, onCell = { i, j -> editCell = i to j }, onPlayer = { ours, i -> editPlayer = ours to i },
+                isScorer = { data.settings.isScorer(m.ourPlayers[it]) })
+            if (m.ourPlayers.none { data.settings.isScorer(it) })
+                Text("Astuce : touche le nom d'un de tes joueurs pour en faire un marqueur ★.", color = Muted, fontSize = 12.sp)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 val avg = m.scores.flatten().average()
                 Text("Moyenne : ${fmt1(avg)}", color = Muted, fontSize = 12.sp)
@@ -181,6 +185,7 @@ fun MatrixScreen(vm: AppViewModel) {
             TextButton({ vm.applyDefaultTeamEverywhere() }) { Text("Appliquer à toutes les matrices") }
             Text("Début de la matrice dans les fichiers importés", color = Muted, fontSize = 12.sp)
             StartPositionControls(data.settings) { st -> vm.updateSettings { st } }
+            ScorerControls(data.settings, m) { w -> vm.updateSettings { it.copy(scorerWeight = w) } }
         }
 
         Section("Notes") {
@@ -196,7 +201,11 @@ fun MatrixScreen(vm: AppViewModel) {
     }
     editPlayer?.let { (ours, i) ->
         val p = if (ours) m.ourPlayers[i] else m.theirPlayers[i]
-        PlayerDialog(p, onDismiss = { editPlayer = null }) { vm.renamePlayer(ours, i, it); editPlayer = null }
+        PlayerDialog(p, scorer = if (ours) data.settings.isScorer(p) else null, onDismiss = { editPlayer = null }) { np, sc ->
+            vm.renamePlayer(ours, i, np)
+            if (sc != null) vm.setScorer(np, sc)
+            editPlayer = null
+        }
     }
     if (askUrl) UrlDialog(data.settings.lastSheetUrl, onDismiss = { askUrl = false }) { askUrl = false; vm.importUrl(it) }
     if (confirmDelete) {
@@ -219,7 +228,7 @@ fun ActionChip(label: String, icon: ImageVector, onClick: () -> Unit) {
 }
 
 @Composable
-fun MatrixGrid(m: Matchup, onCell: (Int, Int) -> Unit, onPlayer: (Boolean, Int) -> Unit) {
+fun MatrixGrid(m: Matchup, onCell: (Int, Int) -> Unit, onPlayer: (Boolean, Int) -> Unit, isScorer: (Int) -> Boolean = { false }) {
     val cell = 52.dp
     Row(Modifier.horizontalScroll(rememberScrollState())) {
         Column {
@@ -229,7 +238,7 @@ fun MatrixGrid(m: Matchup, onCell: (Int, Int) -> Unit, onPlayer: (Boolean, Int) 
                     Modifier.width(104.dp).height(cell).clickable { onPlayer(true, i) }.padding(end = 6.dp),
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Text(p.name, color = OurRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text((if (isScorer(i)) "★ " else "") + p.name, color = OurRed, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (p.faction.isNotBlank()) Text(p.faction, color = Muted, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
@@ -295,9 +304,10 @@ private fun CellDialog(m: Matchup, i: Int, j: Int, onDismiss: () -> Unit, onSet:
 }
 
 @Composable
-private fun PlayerDialog(p: Player, onDismiss: () -> Unit, onSave: (Player) -> Unit) {
+private fun PlayerDialog(p: Player, scorer: Boolean?, onDismiss: () -> Unit, onSave: (Player, Boolean?) -> Unit) {
     var name by remember { mutableStateOf(p.name) }
     var faction by remember { mutableStateOf(p.faction) }
+    var isScorer by remember { mutableStateOf(scorer) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Joueur") },
@@ -305,9 +315,19 @@ private fun PlayerDialog(p: Player, onDismiss: () -> Unit, onSave: (Player) -> U
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("Nom") }, singleLine = true)
                 OutlinedTextField(faction, { faction = it }, label = { Text("Faction / liste") }, singleLine = true)
+                isScorer?.let { on ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(on, { isScorer = it })
+                        Column {
+                            Text("★ Marqueur", color = Gold, fontWeight = FontWeight.Bold)
+                            Text("Là pour mettre des points : le pairing cherche à le placer sur ses meilleures affiches.",
+                                color = Muted, fontSize = 12.sp)
+                        }
+                    }
+                }
             }
         },
-        confirmButton = { TextButton({ onSave(Player(name.trim().ifEmpty { p.name }, faction.trim())) }) { Text("OK") } },
+        confirmButton = { TextButton({ onSave(Player(name.trim().ifEmpty { p.name }, faction.trim()), isScorer) }) { Text("OK") } },
         dismissButton = { TextButton(onDismiss) { Text("Annuler") } }
     )
 }
@@ -439,4 +459,19 @@ fun shareText(context: Context, subject: String, text: String) {
         putExtra(Intent.EXTRA_TEXT, text)
     }
     context.startActivity(Intent.createChooser(i, "Partager"))
+}
+
+/** Poids des marqueurs : de quoi on grossit leurs écarts à l'égalité dans le calcul. */
+@Composable
+private fun ScorerControls(settings: Settings, m: Matchup, onWeight: (Double) -> Unit) {
+    val names = m.ourPlayers.filter { settings.isScorer(it) }.joinToString { it.name }
+    Text("Marqueurs ★ " + if (names.isEmpty()) "(aucun dans cette matrice)" else ": $names", color = Muted, fontSize = 12.sp)
+    var w by remember(settings.scorerWeight) { mutableStateOf(settings.scorerWeight) }
+    Text("Priorité aux marqueurs : ×${fmt1(w)}" + if (w == 1.0) " (désactivée)" else "", color = Bone, fontSize = 13.sp)
+    Slider(
+        value = w.toFloat(), onValueChange = { w = Math.round(it * 4) / 4.0 }, onValueChangeFinished = { onWeight(w) },
+        valueRange = 1f..2.5f, steps = 5
+    )
+    Text("Pour choisir les cartes, leurs écarts à l'égalité sont multipliés par ce poids (×1,5 : un 16 pèse comme un 19). " +
+        "Les points affichés restent les vrais ; l'onglet Analyse montre ce que ça coûte.", color = Muted, fontSize = 11.sp)
 }

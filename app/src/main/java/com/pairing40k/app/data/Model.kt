@@ -79,8 +79,28 @@ data class Settings(
     val startRow: Int = 1,
     val startCol: Int = 1,
     /** Dernier lien Google Sheets importé, proposé par défaut. */
-    val lastSheetUrl: String = ""
-)
+    val lastSheetUrl: String = "",
+    /**
+     * Joueurs « marqueurs » (par nom, toutes matrices) : le calcul cherche à
+     * les placer sur leurs bonnes affiches en grossissant leurs écarts à
+     * l'égalité de [scorerWeight]. Les points affichés restent les vrais.
+     */
+    val scorers: Set<String> = emptySet(),
+    val scorerWeight: Double = 1.5
+) {
+    fun isScorer(p: Player) = p.name.trim().lowercase() in scorers
+}
+
+/** Matrice servant à choisir les cartes : écarts des marqueurs × [Settings.scorerWeight]. */
+fun Matchup.playScores(settings: Settings): List<List<Double>> {
+    val mid = maxScore / 2
+    return scores.mapIndexed { i, row ->
+        if (!settings.isScorer(ourPlayers[i])) row else row.map { mid + settings.scorerWeight * (it - mid) }
+    }
+}
+
+/** Index de nos joueurs marqueurs dans cette matrice. */
+fun Matchup.scorerIndices(settings: Settings): List<Int> = ourPlayers.indices.filter { settings.isScorer(ourPlayers[it]) }
 
 data class AppData(
     val matchups: List<Matchup> = listOf(Matchup.blank(8)),

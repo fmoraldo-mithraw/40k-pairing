@@ -11,6 +11,8 @@ import com.pairing40k.app.data.MatrixImport
 import com.pairing40k.app.data.Matchup
 import com.pairing40k.app.data.PlayedGame
 import com.pairing40k.app.data.Settings
+import com.pairing40k.app.data.playScores
+import com.pairing40k.app.data.scorerIndices
 import com.pairing40k.app.data.WorkbookImport
 import com.pairing40k.app.data.Player
 import com.pairing40k.app.data.Store
@@ -31,10 +33,18 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** Résultat d'analyse d'une matrice : le solveur reste chaud pour le pairing en direct. */
+/**
+ * Résultat d'analyse d'une matrice : le solveur reste chaud pour le pairing en direct.
+ * [play] = matrice servant aux choix (marqueurs pondérés) ; toutes les valeurs
+ * sont en vrais points. [baseline] : la même analyse sans favoriser les
+ * marqueurs, pour afficher le prix de ce choix (null sans marqueur).
+ */
 class Analysis(
     val matchupId: String,
     val scores: List<List<Double>>,
+    val play: List<List<Double>>,
+    val scorers: List<Int>,
+    val baseline: Baseline?,
     val solver: PairingSolver,
     val value: Double,
     val secure: Double,
@@ -42,6 +52,8 @@ class Analysis(
     val worst: Assignment.Result,
     val probabilities: Array<DoubleArray>
 )
+
+class Baseline(val value: Double, val probabilities: Array<DoubleArray>)
 
 /**
  * Compte rendu du dernier import : les matrices sont déjà créées ; l'écran
@@ -107,7 +119,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             pairingFor = a.id
             _pairing.value = listOf(PairingState.start(a.size))
         }
-        if (before.active.id != a.id || before.active.scores != a.scores) analyze()
+        if (before.active.id != a.id || before.active.scores != a.scores ||
+            before.active.playScores(before.settings) != a.playScores(after.settings)) analyze()
     }
 
     fun updateMatchup(f: (Matchup) -> Matchup) = update { d ->
@@ -142,15 +155,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val m = _data.value.active
         analysisJob?.cancel()
         if (m.size !in setOf(4, 6, 8)) { _analysis.value = null; return }
-        if (_analysis.value?.let { it.matchupId == m.id && it.scores == m.scores } == true) return
+        val settings = _data.value.settings
+        val play = m.playScores(settings)
+        val scorers = m.scorerIndices(settings)
+        if (_analysis.value?.let { it.matchupId == m.id && it.scores == m.scores && it.play == play } == true) return
         _analysis.value = null
         analysisJob = viewModelScope.launch {
             val result = withContext(Dispatchers.Default) {
-                val solver = PairingSolver(m.scores, m.maxScore)
+                val solver = PairingSolver(m.scores, m.maxScore, play)
                 val full = solver.fullMask
+                val baseline = if (!solver.weighted) null else PairingSolver(m.scores, m.maxScore).let {
+                    Baseline(it.stateValue(full, full), it.matchProbabilities())
+                }
                 Analysis(
-                    m.id, m.scores, solver,
-                    solver.stateValue(full, full),
+                    m.id, m.scores, play, scorers, baseline, solver,
+                    solver.expectedValue(full, full),
                     solver.stateValue(full, full, PairingSolver.Mode.SECURE),
                     Assignment.best(m.scores),
                     Assignment.worst(m.scores),
@@ -325,8 +344,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun renamePlayer(ours: Boolean, index: Int, p: Player) = updateMatchup { m ->
-        if (ours) m.copy(ourPlayers = m.ourPlayers.mapIndexed { i, x -> if (i == index) p else x })
-        else m.copy(theirPlayers = m.theirPlayers.mapIndexed { i, x -> if (i == index) p else x })
+    fun renamePlayer(ours: Boolean, index: Int, p: Player) = update { d ->
+        val cur = d.active
+        val old = if (ours) cur.ourPlayers[index] else null
+        val m = if (ours) cur.copy(ourPlayers = cur.ourPlayers.mapIndexed { i, x -> if (i == index) p else x })
+            else cur.copy(theirPlayers = cur.theirPlayers.mapIndexed { i, x -> if (i == index) p else x })
+        // Un marqueur renommé reste marqueur
+        val st = d.settings
+        val settings = if (old != null && st.isScorer(old)) st.copy(scorers = st.scorers - key(old) + key(p)) else st
+        d.copy(matchups = d.matchups.map { if (it.id == cur.id) m else it }, activeId = cur.id, settings = settings)
+    }
+
+    private fun key(p: Player) = p.name.trim().lowercase()
+
+    /** Marque / démarque un de nos joueurs comme « marqueur ». */
+    fun setScorer(p: Player, on: Boolean) = updateSettings { st ->
+        st.copy(scorers = if (on) st.scorers + key(p) else st.scorers - key(p))
     }
 }

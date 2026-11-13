@@ -21,6 +21,8 @@ object Store {
             put("startRow", data.settings.startRow)
             put("startCol", data.settings.startCol)
             put("lastSheetUrl", data.settings.lastSheetUrl)
+            put("scorers", JSONArray(data.settings.scorers.toList()))
+            put("scorerWeight", data.settings.scorerWeight)
         })
     }.toString()
 
@@ -39,7 +41,9 @@ object Store {
                     autoStart = st.optBoolean("autoStart", true),
                     startRow = st.optInt("startRow", 1).coerceAtLeast(1),
                     startCol = st.optInt("startCol", 1).coerceAtLeast(1),
-                    lastSheetUrl = st.optString("lastSheetUrl", "")
+                    lastSheetUrl = st.optString("lastSheetUrl", ""),
+                    scorers = st.optJSONArray("scorers")?.let { a -> List(a.length()) { a.getString(it) }.toSet() }.orEmpty(),
+                    scorerWeight = st.optDouble("scorerWeight", 1.5).coerceIn(1.0, 3.0)
                 )
             } ?: Settings()
         )

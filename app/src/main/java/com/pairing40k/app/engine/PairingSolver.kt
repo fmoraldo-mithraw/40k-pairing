@@ -25,18 +25,33 @@ import kotlin.math.min
  *  - [Mode.SECURE] : le plancher garanti en jouant des choix purs, même si
  *    l'adversaire lit parfaitement nos cartes à chaque étape.
  *
+ * [play] (facultatif) : matrice « pondérée » qui sert à choisir les cartes
+ * (ex. joueurs marqueurs dont les écarts comptent plus). Les stratégies
+ * d'équilibre sont calculées dessus, mais toutes les valeurs affichées
+ * (espérances, plancher, projections) restent en vrais points de [scores].
+ *
  * Les équipes sont des masques de bits (joueur i présent ⇔ bit i), les valeurs
  * d'états sont mémorisées : un 8v8 complet se résout en une fraction de seconde.
  */
-class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
+class PairingSolver(
+    scores: List<List<Double>>,
+    val maxScore: Double = 20.0,
+    play: List<List<Double>>? = null
+) {
 
     enum class Mode { NASH, SECURE }
 
     val n: Int = scores.size
-    private val s: Array<DoubleArray> = Array(n) { i -> DoubleArray(n) { j -> scores[i][j] } }
+    /** Vrais points. */
+    private val r: Array<DoubleArray> = Array(n) { i -> DoubleArray(n) { j -> scores[i][j] } }
+    /** Points servant à choisir les cartes (= [r] sans pondération). */
+    private val s: Array<DoubleArray> = if (play == null) r else Array(n) { i -> DoubleArray(n) { j -> play[i][j] } }
+    /** Les stratégies sont-elles calculées sur une matrice pondérée ? */
+    val weighted: Boolean = play != null && (0 until n).any { i -> (0 until n).any { j -> play[i][j] != scores[i][j] } }
     private val stride = 1 shl n
     private val nashMemo = DoubleArray(stride * stride) { Double.NaN }
     private val secureMemo = DoubleArray(stride * stride) { Double.NaN }
+    private val realMemo = DoubleArray(stride * stride) { Double.NaN }
 
     init {
         require(n in setOf(4, 6, 8)) { "Formats gérés : 4, 6 ou 8 joueurs (reçu $n)" }
@@ -45,7 +60,10 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
 
     val fullMask: Int get() = stride - 1
 
-    fun score(our: Int, their: Int): Double = s[our][their]
+    fun score(our: Int, their: Int): Double = r[our][their]
+
+    /** NASH : matrice des stratégies ; SECURE : vrais points (garantie réelle). */
+    private fun sc(mode: Mode) = if (mode == Mode.NASH) s else r
 
     // ---------------------------------------------------------------- valeurs
 
@@ -59,7 +77,7 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
         require(k == Integer.bitCount(b)) { "Les deux équipes doivent avoir le même nombre de joueurs" }
         val v = when {
             k == 0 -> 0.0
-            k == 1 -> s[lowest(a)][lowest(b)]
+            k == 1 -> sc(mode)[lowest(a)][lowest(b)]
             k < 4 -> throw IllegalArgumentException("État impossible : $k joueurs restants")
             else -> aggregate(defenderMatrix(a, b, mode), mode)
         }
@@ -105,16 +123,90 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
     private fun choiceOutcome(
         a: Int, b: Int, d: Int, e: Int, p: IntArray, q: IntArray, i: Int, j: Int, mode: Mode
     ): Double {
-        var v = s[d][q[i]] + s[p[j]][e]
+        val m = sc(mode)
+        var v = m[d][q[i]] + m[p[j]][e]
         val restA = a and (1 shl d).inv() and (1 shl p[j]).inv()
         val restB = b and (1 shl e).inv() and (1 shl q[i]).inv()
         if (Integer.bitCount(a) == 4) {
             val refusedA = p[1 - j]
             val refusedB = q[1 - i]
-            v += s[refusedA][refusedB]
-            v += s[lowest(restA and (1 shl refusedA).inv())][lowest(restB and (1 shl refusedB).inv())]
+            v += m[refusedA][refusedB]
+            v += m[lowest(restA and (1 shl refusedA).inv())][lowest(restB and (1 shl refusedB).inv())]
         } else {
             v += stateValue(restA, restB, mode)
+        }
+        return v
+    }
+
+    // ------------------------------------------------- vrais points attendus
+
+    /*
+     * Vrais points attendus quand les deux équipes jouent les stratégies
+     * d'équilibre de la matrice [s] (pondérée ou non). Sans pondération,
+     * identique à la valeur NASH.
+     */
+
+    /** Vrais points attendus sur les matchs restant à former. */
+    fun expectedValue(a: Int, b: Int): Double {
+        if (!weighted) return stateValue(a, b)
+        val key = a * stride + b
+        val cached = realMemo[key]
+        if (!cached.isNaN()) return cached
+        val k = Integer.bitCount(a)
+        val v = when (k) {
+            0 -> 0.0
+            1 -> r[lowest(a)][lowest(b)]
+            else -> mixed(defenderMatrix(a, b, Mode.NASH), realDefenderMatrix(a, b))
+        }
+        realMemo[key] = v
+        return v
+    }
+
+    /** Valeur réelle d'un sous-jeu : stratégies tirées de [play], gains de [real]. */
+    private fun mixed(play: Array<DoubleArray>, real: Array<DoubleArray>): Double {
+        val sol = MatrixGame.solve(play)
+        var v = 0.0
+        for (i in real.indices) for (j in real[i].indices) v += sol.row[i] * sol.col[j] * real[i][j]
+        return v
+    }
+
+    private fun realDefenderMatrix(a: Int, b: Int): Array<DoubleArray> {
+        val ours = bits(a)
+        val theirs = bits(b)
+        return Array(ours.size) { i -> DoubleArray(theirs.size) { j -> realAttackersValue(a, b, ours[i], theirs[j]) } }
+    }
+
+    private fun realAttackersValue(a: Int, b: Int, d: Int, e: Int): Double =
+        mixed(attackersMatrix(a, b, d, e, Mode.NASH), realAttackersMatrix(a, b, d, e))
+
+    private fun realAttackersMatrix(a: Int, b: Int, d: Int, e: Int): Array<DoubleArray> {
+        val ourPairs = pairs(a and (1 shl d).inv())
+        val theirPairs = pairs(b and (1 shl e).inv())
+        return Array(ourPairs.size) { i ->
+            DoubleArray(theirPairs.size) { j -> realChoiceValue(a, b, d, e, ourPairs[i], theirPairs[j]) }
+        }
+    }
+
+    private fun realChoiceValue(a: Int, b: Int, d: Int, e: Int, p: IntArray, q: IntArray): Double =
+        mixed(choiceMatrix(a, b, d, e, p, q, Mode.NASH), realChoiceMatrix(a, b, d, e, p, q))
+
+    private fun choiceMatrix(a: Int, b: Int, d: Int, e: Int, p: IntArray, q: IntArray, mode: Mode) =
+        Array(2) { i -> DoubleArray(2) { j -> choiceOutcome(a, b, d, e, p, q, i, j, mode) } }
+
+    private fun realChoiceMatrix(a: Int, b: Int, d: Int, e: Int, p: IntArray, q: IntArray) =
+        Array(2) { i -> DoubleArray(2) { j -> realChoiceOutcome(a, b, d, e, p, q, i, j) } }
+
+    private fun realChoiceOutcome(a: Int, b: Int, d: Int, e: Int, p: IntArray, q: IntArray, i: Int, j: Int): Double {
+        var v = r[d][q[i]] + r[p[j]][e]
+        val restA = a and (1 shl d).inv() and (1 shl p[j]).inv()
+        val restB = b and (1 shl e).inv() and (1 shl q[i]).inv()
+        if (Integer.bitCount(a) == 4) {
+            val refusedA = p[1 - j]
+            val refusedB = q[1 - i]
+            v += r[refusedA][refusedB]
+            v += r[lowest(restA and (1 shl refusedA).inv())][lowest(restB and (1 shl refusedB).inv())]
+        } else {
+            v += expectedValue(restA, restB)
         }
         return v
     }
@@ -125,14 +217,16 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
     fun analyzeDefenders(a: Int, b: Int): StepAnalysis<Int, Int> {
         val ours = bits(a).toList()
         val theirs = bits(b).toList()
-        return analyze(ours, theirs, defenderMatrix(a, b, Mode.NASH), defenderMatrix(a, b, Mode.SECURE))
+        val nash = defenderMatrix(a, b, Mode.NASH)
+        return analyze(ours, theirs, nash, defenderMatrix(a, b, Mode.SECURE), if (weighted) realDefenderMatrix(a, b) else nash)
     }
 
     /** Attaquants (défenseurs connus) : paires de joueurs des deux côtés. */
     fun analyzeAttackers(a: Int, b: Int, d: Int, e: Int): StepAnalysis<List<Int>, List<Int>> {
         val ours = pairs(a and (1 shl d).inv()).map { it.toList() }
         val theirs = pairs(b and (1 shl e).inv()).map { it.toList() }
-        return analyze(ours, theirs, attackersMatrix(a, b, d, e, Mode.NASH), attackersMatrix(a, b, d, e, Mode.SECURE))
+        val nash = attackersMatrix(a, b, d, e, Mode.NASH)
+        return analyze(ours, theirs, nash, attackersMatrix(a, b, d, e, Mode.SECURE), if (weighted) realAttackersMatrix(a, b, d, e) else nash)
     }
 
     /**
@@ -142,31 +236,32 @@ class PairingSolver(scores: List<List<Double>>, val maxScore: Double = 20.0) {
     fun analyzeChoice(a: Int, b: Int, d: Int, e: Int, p: List<Int>, q: List<Int>): StepAnalysis<Int, Int> {
         val pa = p.toIntArray()
         val qa = q.toIntArray()
-        fun matrix(mode: Mode) = Array(2) { i ->
-            DoubleArray(2) { j -> choiceOutcome(a, b, d, e, pa, qa, i, j, mode) }
-        }
-        return analyze(q, p, matrix(Mode.NASH), matrix(Mode.SECURE))
+        val nash = choiceMatrix(a, b, d, e, pa, qa, Mode.NASH)
+        return analyze(q, p, nash, choiceMatrix(a, b, d, e, pa, qa, Mode.SECURE), if (weighted) realChoiceMatrix(a, b, d, e, pa, qa) else nash)
     }
 
     private fun <O, T> analyze(
-        ours: List<O>, theirs: List<T>, nash: Array<DoubleArray>, secure: Array<DoubleArray>
+        ours: List<O>, theirs: List<T>, nash: Array<DoubleArray>, secure: Array<DoubleArray>, real: Array<DoubleArray>
     ): StepAnalysis<O, T> {
+        // Stratégies : matrice de jeu [nash] ; gains affichés : vrais points [real]
         val sol = MatrixGame.solve(nash)
         val ourEvals = ours.mapIndexed { i, o ->
             var exp = 0.0
-            for (j in theirs.indices) exp += nash[i][j] * sol.col[j]
+            for (j in theirs.indices) exp += real[i][j] * sol.col[j]
             var floor = Double.POSITIVE_INFINITY
             for (j in theirs.indices) floor = min(floor, secure[i][j])
             OptionEval(o, sol.row[i], exp, floor)
         }
         val theirEvals = theirs.mapIndexed { j, t ->
             var exp = 0.0
-            for (i in ours.indices) exp += sol.row[i] * nash[i][j]
+            for (i in ours.indices) exp += sol.row[i] * real[i][j]
             var best = Double.NEGATIVE_INFINITY
             for (i in ours.indices) best = maxOf(best, secure[i][j])
             OptionEval(t, sol.col[j], exp, best)
         }
-        return StepAnalysis(sol.value, MatrixGame.maximin(secure), ourEvals, theirEvals, nash)
+        var value = 0.0
+        for (i in ours.indices) for (j in theirs.indices) value += sol.row[i] * sol.col[j] * real[i][j]
+        return StepAnalysis(value, MatrixGame.maximin(secure), ourEvals, theirEvals, real)
     }
 
     // ------------------------------------------------- matchs probables
