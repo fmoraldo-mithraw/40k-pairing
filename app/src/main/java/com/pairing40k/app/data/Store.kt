@@ -20,6 +20,7 @@ object Store {
             put("autoStart", data.settings.autoStart)
             put("startRow", data.settings.startRow)
             put("startCol", data.settings.startCol)
+            put("lastSheetUrl", data.settings.lastSheetUrl)
         })
     }.toString()
 
@@ -37,7 +38,8 @@ object Store {
                     defaultTeam = st.optString("defaultTeam", "Nous"),
                     autoStart = st.optBoolean("autoStart", true),
                     startRow = st.optInt("startRow", 1).coerceAtLeast(1),
-                    startCol = st.optInt("startCol", 1).coerceAtLeast(1)
+                    startCol = st.optInt("startCol", 1).coerceAtLeast(1),
+                    lastSheetUrl = st.optString("lastSheetUrl", "")
                 )
             } ?: Settings()
         )

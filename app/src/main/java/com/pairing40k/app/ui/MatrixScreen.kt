@@ -25,6 +25,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ContentPaste
 import androidx.compose.material.icons.rounded.Delete
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material.icons.rounded.Upload
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
@@ -196,7 +198,7 @@ fun MatrixScreen(vm: AppViewModel) {
         val p = if (ours) m.ourPlayers[i] else m.theirPlayers[i]
         PlayerDialog(p, onDismiss = { editPlayer = null }) { vm.renamePlayer(ours, i, it); editPlayer = null }
     }
-    if (askUrl) UrlDialog(onDismiss = { askUrl = false }) { askUrl = false; vm.importUrl(it) }
+    if (askUrl) UrlDialog(data.settings.lastSheetUrl, onDismiss = { askUrl = false }) { askUrl = false; vm.importUrl(it) }
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
@@ -311,8 +313,8 @@ private fun PlayerDialog(p: Player, onDismiss: () -> Unit, onSave: (Player) -> U
 }
 
 @Composable
-private fun UrlDialog(onDismiss: () -> Unit, onOk: (String) -> Unit) {
-    var url by remember { mutableStateOf("") }
+private fun UrlDialog(initial: String, onDismiss: () -> Unit, onOk: (String) -> Unit) {
+    var url by remember { mutableStateOf(initial) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Lien Google Sheets") },
@@ -320,7 +322,10 @@ private fun UrlDialog(onDismiss: () -> Unit, onOk: (String) -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Colle le lien du fichier (partagé « tous les utilisateurs disposant du lien »). L'onglet ouvert dans le lien (gid) est celui importé.",
                     fontSize = 13.sp, color = Muted)
-                OutlinedTextField(url, { url = it }, placeholder = { Text("https://docs.google.com/spreadsheets/d/…") }, singleLine = true)
+                OutlinedTextField(url, { url = it }, placeholder = { Text("https://docs.google.com/spreadsheets/d/…") }, singleLine = true,
+                    trailingIcon = {
+                        if (url.isNotEmpty()) IconButton({ url = "" }) { Icon(Icons.Rounded.Close, contentDescription = "Vider") }
+                    })
             }
         },
         confirmButton = { TextButton({ onOk(url) }, enabled = url.isNotBlank()) { Text("Importer") } },

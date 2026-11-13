@@ -77,7 +77,9 @@ data class Settings(
     /** Début de matrice détecté automatiquement ; sinon [startRow] / [startCol]. */
     val autoStart: Boolean = true,
     val startRow: Int = 1,
-    val startCol: Int = 1
+    val startCol: Int = 1,
+    /** Dernier lien Google Sheets importé, proposé par défaut. */
+    val lastSheetUrl: String = ""
 )
 
 data class AppData(

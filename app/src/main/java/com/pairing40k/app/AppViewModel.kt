@@ -257,6 +257,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * les onglets avec leurs noms. Autre lien : contenu brut (CSV ou xlsx).
      */
     fun importUrl(url: String) {
+        updateSettings { it.copy(lastSheetUrl = url.trim()) }
         val target = MatrixImport.googleSheetsXlsxUrl(url) ?: url.trim()
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {

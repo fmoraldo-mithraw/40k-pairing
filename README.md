@@ -55,6 +55,7 @@ manche, pourquoi alterner quand le conseil est un mélange, et ce que coûtent l
   forcé à la main (colonne + ligne de la case du coin) dans les réglages.
 - **Nom de notre équipe par défaut** (réglages), appliqué aux nouvelles matrices.
 - Lien Google Sheets : le fichier doit être partagé « tous les utilisateurs disposant du lien ».
+  Le dernier lien utilisé est mémorisé et proposé par défaut (croix pour vider le champ).
 - Aussi : **CSV / TSV** (séparateur `;` d'Excel FR, `,`, tabulation), **copier-coller** d'une
   plage, fichier partagé / ouvert depuis Drive, mail… (nom d'équipe = case du coin, sinon nom du fichier).
 - Dispositions : **grille** (adversaires en ligne d'en-tête, nos joueurs en colonne, factions
