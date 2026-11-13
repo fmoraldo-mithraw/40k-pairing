@@ -86,11 +86,11 @@ fun AnalysisScreen(vm: AppViewModel) {
             }
         }
 
-        Section("Affiches probables", subtitle = "Probabilité que chacun de nos joueurs affronte chaque adversaire, pairing joué à l'équilibre.") {
+        Section("Affiches probables", subtitle = "Avant le pairing, on ne sait pas encore qui jouera qui : chaque joueur n'aura qu'un adversaire, mais ce tableau donne les chances de tomber sur chacun (les % d'une ligne font 100 %). En petit : le score estimé de l'affiche.") {
             ProbabilityGrid(m, a)
         }
 
-        Section("Contribution par joueur", subtitle = "Points attendus de chaque joueur, et son adversaire le plus probable.") {
+        Section("Contribution par joueur", subtitle = "Points moyens attendus de chaque joueur (moyenne des scores sur 20 pondérée par les chances de chaque affiche), et son adversaire le plus probable.") {
             m.ourPlayers.forEachIndexed { i, p ->
                 val row = a.probabilities[i]
                 val exp = row.indices.sumOf { row[it] * m.scores[i][it] }
