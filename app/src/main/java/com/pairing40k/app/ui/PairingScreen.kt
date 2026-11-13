@@ -49,7 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pairing40k.app.Analysis
 import com.pairing40k.app.AppViewModel
-import com.pairing40k.app.data.CloseScores
 import com.pairing40k.app.data.Matchup
 import com.pairing40k.app.engine.Game
 import com.pairing40k.app.engine.OptionEval
@@ -84,7 +83,7 @@ fun PairingScreen(vm: AppViewModel) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
-        StatusCard(m, a, st, data.settings.closeScores, stack.size > 1, training, onTraining = { training = it }, onUndo = vm::undoPairing, onReset = vm::resetPairing)
+        StatusCard(m, a, st, stack.size > 1, training, onTraining = { training = it }, onUndo = vm::undoPairing, onReset = vm::resetPairing)
         when (st.phase) {
             Phase.DEFENDERS -> DefendersStep(m, a, st, training) { vm.pushPairing(it) }
             Phase.ATTACKERS -> AttackersStep(m, a, st, training) { vm.pushPairing(it) }
@@ -103,11 +102,10 @@ private fun roundsFor(n: Int) = (n - 4) / 2 + 1
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StatusCard(
-    m: Matchup, a: Analysis, st: PairingState, close: CloseScores, canUndo: Boolean, training: Boolean,
+    m: Matchup, a: Analysis, st: PairingState, canUndo: Boolean, training: Boolean,
     onTraining: (Boolean) -> Unit, onUndo: () -> Unit, onReset: () -> Unit
 ) {
-    // Totaux dans l'échelle du calcul (scores serrés atténués), comme la projection
-    val fixed = st.games.sumOf { a.scores[it.our][it.their] }
+    val fixed = st.games.sumOf { m.scores[it.our][it.their] }
     val rest = remember(st, a) {
         when (st.phase) {
         Phase.DEFENDERS -> a.solver.stateValue(st.ourLeft, st.theirLeft)
@@ -135,10 +133,6 @@ private fun StatusCard(
                 Switch(training, onTraining, modifier = Modifier.padding(start = 4.dp))
             }
         }
-        if (close != CloseScores.RAW) Text(
-            "Calcul : scores serrés ${close.label.lowercase()} (au feeling, ils pèsent moins que les gros écarts). Réglage dans l'onglet Matrice.",
-            color = Muted, fontSize = 11.sp
-        )
         if (training) Text("Mode entraînement : l'adversaire virtuel joue sa stratégie optimale (tirage aléatoire) quand tu valides.",
             color = Gold, fontSize = 12.sp)
     }
@@ -429,7 +423,7 @@ private fun ChoicesStep(m: Matchup, a: Analysis, st: PairingState, training: Boo
 @Composable
 private fun DoneStep(m: Matchup, a: Analysis, st: PairingState, onSave: () -> Unit, onNew: () -> Unit) {
     val context = LocalContext.current
-    val total = st.games.sumOf { a.scores[it.our][it.their] }
+    val total = st.games.sumOf { m.scores[it.our][it.their] }
     Section("Résultat du pairing") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             Stat("Total estimé", fmt1(total), color = scoreColor(total, m.maxScore * m.size), sub = "sur ${fmt1(m.maxScore * m.size)}")

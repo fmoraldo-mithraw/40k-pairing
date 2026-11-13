@@ -36,12 +36,6 @@ d'une seconde. Deux lectures sont données à chaque fois :
 - **Espérance** : points attendus face à un adversaire qui joue parfaitement ;
 - **Plancher** : ce qu'on s'assure en choix purs même si l'adversaire lit notre jeu.
 
-**Scores serrés atténués.** Une matrice se remplit au feeling : un gros écart (≤ 5 ou ≥ 15 sur 20)
-est en général une vraie lecture du match, un 12 ou un 8 beaucoup moins. Par défaut, le calcul
-rapproche donc les scores serrés de l'égalité (12 compte ≈ 11,2) sans toucher aux gros écarts :
-le pairing cherche d'abord à placer les matchs très déséquilibrés. Réglage dans l'onglet
-Matrice (*Tels quels* / *Atténués* / *Très atténués*) ; la matrice affichée ne change pas.
-
 **Pourquoi ce conseil ?** Sous chaque conseil, un cadre dépliable explique le choix : leur
 meilleure parade et le meilleur cas pour chaque option conseillée, les matchs probables de la
 manche, pourquoi alterner quand le conseil est un mélange, et ce que coûtent les autres options.

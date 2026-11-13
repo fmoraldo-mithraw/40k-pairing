@@ -20,7 +20,6 @@ object Store {
             put("autoStart", data.settings.autoStart)
             put("startRow", data.settings.startRow)
             put("startCol", data.settings.startCol)
-            put("closeScores", data.settings.closeScores.name)
         })
     }.toString()
 
@@ -38,8 +37,7 @@ object Store {
                     defaultTeam = st.optString("defaultTeam", "Nous"),
                     autoStart = st.optBoolean("autoStart", true),
                     startRow = st.optInt("startRow", 1).coerceAtLeast(1),
-                    startCol = st.optInt("startCol", 1).coerceAtLeast(1),
-                    closeScores = CloseScores.values().firstOrNull { it.name == st.optString("closeScores") } ?: CloseScores.SOFT
+                    startCol = st.optInt("startCol", 1).coerceAtLeast(1)
                 )
             } ?: Settings()
         )
